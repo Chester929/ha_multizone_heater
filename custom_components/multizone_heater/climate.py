@@ -598,7 +598,8 @@ class MultizoneHeaterClimate(ClimateEntity):
                                 del self._valve_no_reopen_until[valve_entity]
                 else:  # COOL mode
                     # For cooling: per_zone_desired_main = zone_target - compensation_factor * (zone_current - zone_target)
-                    zone_desired_main = zone_target - self._compensation_factor * (-deficit)
+                    # Simplified: zone_target + compensation_factor * deficit (deficit is negative for cooling)
+                    zone_desired_main = zone_target + self._compensation_factor * deficit
                     
                     # For cooling, inverse logic
                     if is_currently_open:

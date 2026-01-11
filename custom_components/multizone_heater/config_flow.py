@@ -110,6 +110,11 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._main_max_temp = user_input.get(
                 CONF_MAIN_MAX_TEMP, DEFAULT_MAIN_MAX_TEMP
             )
+            
+            # Validate main_min_temp < main_max_temp
+            if self._main_min_temp >= self._main_max_temp:
+                errors["base"] = "invalid_temp_range"
+                
             self._main_change_threshold = user_input.get(
                 CONF_MAIN_CHANGE_THRESHOLD, DEFAULT_MAIN_CHANGE_THRESHOLD
             )
@@ -120,7 +125,8 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_ALL_SATISFIED_MODE, DEFAULT_ALL_SATISFIED_MODE
             )
 
-            return await self.async_step_add_zone()
+            if not errors:
+                return await self.async_step_add_zone()
 
         data_schema = vol.Schema(
             {
@@ -427,8 +433,16 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         errors = {}
 
         if user_input is not None:
-            # Update the config entry
-            return self.async_create_entry(title="", data=user_input)
+            # Validate main_min_temp < main_max_temp
+            main_min = user_input.get(CONF_MAIN_MIN_TEMP, DEFAULT_MAIN_MIN_TEMP)
+            main_max = user_input.get(CONF_MAIN_MAX_TEMP, DEFAULT_MAIN_MAX_TEMP)
+            
+            if main_min >= main_max:
+                errors["base"] = "invalid_temp_range"
+            
+            if not errors:
+                # Update the config entry
+                return self.async_create_entry(title="", data=user_input)
 
         data_schema = vol.Schema(
             {

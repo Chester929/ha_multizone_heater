@@ -39,7 +39,8 @@
       "need_virtual_switch": "Physical valve requires a virtual switch (virtual switch pattern).",
       "need_physical_valve": "Virtual switch requires a physical valve (virtual switch pattern).",
       "duplicate_entity": "This entity is already used in another zone.",
-      "need_fallback": "At least one fallback zone must be selected for pump safety."
+      "need_fallback": "At least one fallback zone must be selected for pump safety.",
+      "invalid_temp_range": "Main minimum temperature must be less than main maximum temperature."
     }
   },
   "options": {
