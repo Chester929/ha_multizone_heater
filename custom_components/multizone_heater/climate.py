@@ -902,7 +902,6 @@ class MultizoneHeaterClimate(ClimateEntity):
                         if is_currently_open and should_open:
                             physical_close_threshold = upper_bound - self._physical_close_anticipation
                             if current_temp >= physical_close_threshold:
-                                should_open_before_anticipation = should_open
                                 should_open = False
                                 
                                 # Set reopen suppression if closing early
