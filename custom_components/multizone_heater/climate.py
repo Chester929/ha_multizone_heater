@@ -311,33 +311,13 @@ class MultizoneHeaterClimate(ClimateEntity):
                 if self._zone_target_change_main_timer and not self._zone_target_change_main_timer.done():
                     self._zone_target_change_main_timer.cancel()
                 
-                # Schedule delayed valve control (independent async task)
-                async def delayed_valve_control():
-                    """Execute valve control after debounce delay."""
-                    try:
-                        await asyncio.sleep(DEFAULT_ZONE_TARGET_CHANGE_DELAY)
-                        _LOGGER.debug("Valve debounce delay complete - executing valve control")
-                        await self._async_control_valves()
-                    except asyncio.CancelledError:
-                        _LOGGER.debug("Valve debounce timer cancelled - newer target change received")
-                    finally:
-                        self._zone_target_change_valve_timer = None
-                
-                # Schedule delayed main climate update (independent async task, runs in parallel)
-                async def delayed_main_climate_update():
-                    """Execute main climate update after debounce delay."""
-                    try:
-                        await asyncio.sleep(DEFAULT_ZONE_TARGET_CHANGE_DELAY)
-                        _LOGGER.debug("Main climate debounce delay complete - updating main climate")
-                        await self._async_update_main_climate()
-                    except asyncio.CancelledError:
-                        _LOGGER.debug("Main climate debounce timer cancelled - newer target change received")
-                    finally:
-                        self._zone_target_change_main_timer = None
-                
-                # Create both tasks - they run in parallel
-                self._zone_target_change_valve_timer = self.hass.async_create_task(delayed_valve_control())
-                self._zone_target_change_main_timer = self.hass.async_create_task(delayed_main_climate_update())
+                # Create both debounced tasks - they run in parallel
+                self._zone_target_change_valve_timer = self.hass.async_create_task(
+                    self._async_delayed_valve_control()
+                )
+                self._zone_target_change_main_timer = self.hass.async_create_task(
+                    self._async_delayed_main_climate_update()
+                )
                 
             elif self._hvac_mode in (HVACMode.HEAT, HVACMode.COOL):
                 # For non-target changes (temperature sensor updates, virtual switch, etc.)
@@ -590,6 +570,28 @@ class MultizoneHeaterClimate(ClimateEntity):
         else:
             self._hvac_action = HVACAction.IDLE
 
+    async def _async_delayed_valve_control(self) -> None:
+        """Execute valve control after debounce delay."""
+        try:
+            await asyncio.sleep(DEFAULT_ZONE_TARGET_CHANGE_DELAY)
+            _LOGGER.debug("Valve debounce delay complete - executing valve control")
+            await self._async_control_valves()
+        except asyncio.CancelledError:
+            _LOGGER.debug("Valve debounce timer cancelled - newer target change received")
+        finally:
+            self._zone_target_change_valve_timer = None
+
+    async def _async_delayed_main_climate_update(self) -> None:
+        """Execute main climate update after debounce delay."""
+        try:
+            await asyncio.sleep(DEFAULT_ZONE_TARGET_CHANGE_DELAY)
+            _LOGGER.debug("Main climate debounce delay complete - updating main climate")
+            await self._async_update_main_climate()
+        except asyncio.CancelledError:
+            _LOGGER.debug("Main climate debounce timer cancelled - newer target change received")
+        finally:
+            self._zone_target_change_main_timer = None
+
     async def _async_update_main_climate(self) -> None:
         """Update main climate target temperature based on zone needs.
         
@@ -700,11 +702,12 @@ class MultizoneHeaterClimate(ClimateEntity):
             
             # Only update if change exceeds threshold
             if self._last_main_target is None or abs(desired_main - self._last_main_target) >= self._main_change_threshold:
+                last_target_display = self._last_main_target if self._last_main_target is not None else 0.0
                 _LOGGER.debug(
                     "Updating main climate from %.1f°C to %.1f°C (change %.1f°C)",
-                    self._last_main_target if self._last_main_target is not None else 0.0,
+                    last_target_display,
                     desired_main,
-                    abs(desired_main - (self._last_main_target or 0.0)),
+                    abs(desired_main - last_target_display),
                 )
                 
                 try:
