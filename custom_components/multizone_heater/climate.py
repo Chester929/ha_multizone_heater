@@ -259,7 +259,11 @@ class MultizoneHeaterClimate(ClimateEntity):
         
         @callback
         def async_sensor_changed(event):
-            """Handle temperature sensor changes."""
+            """Handle temperature sensor changes.
+            
+            Triggers valve control which is serialized via _update_lock.
+            Multiple concurrent calls are safe - they will queue and execute sequentially.
+            """
             self.async_schedule_update_ha_state(True)
             # Trigger valve control when zone states change
             if self._hvac_mode in (HVACMode.HEAT, HVACMode.COOL):
