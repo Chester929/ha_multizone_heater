@@ -27,6 +27,11 @@ This integration provides an efficient, asynchronous Python-based solution for m
 - **Input Validation**: Prevents duplicate entity usage across zones
 - **Error Handling**: Comprehensive error handling for all service calls
 - **Temperature Unit Support**: Automatically uses Home Assistant's configured temperature unit
+- **Intelligent Main Climate Compensation**: Per-zone compensation logic calculates optimal main climate target based on actual zone needs
+- **Valve Transition Delay**: Two-phase valve operation prevents pump issues by opening valves before closing others
+- **Physical Close Anticipation**: Early valve closing prevents temperature overshoot with reopen suppression
+- **All-Satisfied Slider**: Configurable main climate target when all zones are satisfied (interpolates between min/avg/max)
+- **Non-Blocking Updates**: Main climate updates are asynchronous and threshold-based to minimize unnecessary calls
 
 ## Installation
 
@@ -56,9 +61,16 @@ This integration provides an efficient, asynchronous Python-based solution for m
    
    - **Step 1: Main Settings**
      - **Main Climate Entity** (optional): Select your main climate/thermostat entity (e.g., boiler controller)
+     - **Main Temperature Sensor** (optional): Override main climate's temperature reading with a specific sensor
      - **Temperature Aggregation Method**: Choose preset method (average, minimum, or maximum)
      - **Temperature Aggregation Weight**: Fine-tune with 0-100% slider (0% = minimum, 50% = average, 100% = maximum)
      - **Minimum Valves Open**: Number of valves to keep open at all times for system safety (default: 1)
+     - **Compensation Factor**: Corridor compensation for main climate target (default: 0.66, range: 0.0-1.0)
+     - **Valve Transition Delay**: Seconds to wait between opening and closing valves (default: 60s, range: 5-300s)
+     - **Main Min/Max Temperature**: Temperature range for main climate (default: 18.0-30.0°C)
+     - **Main Change Threshold**: Minimum temperature change to update main climate (default: 0.1°C)
+     - **Physical Close Anticipation**: Early close offset to prevent overshoot (default: 0.6°C)
+     - **All Satisfied Mode**: Slider for main target when all zones satisfied (0=min, 50=avg, 100=max, default: 50)
    
    - **Step 2: Add Zones**
      - **Zone Name**: Name for the zone (e.g., "Living Room", "Bedroom")
@@ -153,6 +165,43 @@ The integration monitors temperature sensors in all configured zones and aggrega
   - 100% = Uses maximum temperature (warmest zone)
   - Values between interpolate smoothly (e.g., 25% is halfway between min and average)
 
+### Main Climate Compensation Logic
+
+The integration uses intelligent compensation to set the optimal main climate target based on individual zone needs:
+
+#### Heating Mode Compensation
+For each zone needing heat, the integration calculates a per-zone desired main temperature:
+```
+per_zone_desired_main = zone_target + compensation_factor × (zone_target - zone_current)
+```
+
+**Example:** Zone at 20°C with target 23°C and compensation factor 0.66:
+- Deficit = 23 - 20 = 3°C
+- Desired main = 23 + 0.66 × 3 = 23 + 1.98 = **24.98°C** (rounded to 25.0°C)
+
+The integration then uses the **maximum** of all per-zone desired temperatures as the main climate target, clamped to the configured min/max range (default 18-30°C).
+
+**Multi-zone example:** Two zones with targets 23°C and 27°C at deficits of 3°C and 5°C:
+- Zone 1 desired: 23 + 0.66 × 3 = 24.98°C
+- Zone 2 desired: 27 + 0.66 × 5 = 30.3°C
+- Main target = max(24.98, 30.3) = **30.0°C** (clamped to max)
+
+#### Cooling Mode Compensation
+For cooling, the logic is inversed:
+```
+per_zone_desired_main = zone_target - compensation_factor × (zone_current - zone_target)
+```
+
+The integration uses the **minimum** of all per-zone desired temperatures.
+
+#### All Zones Satisfied Behavior
+When all zones are satisfied (no heating/cooling needed), the integration uses the "All Satisfied Mode" slider:
+- **0%**: Uses minimum zone target
+- **50%**: Uses average zone target (default)
+- **100%**: Uses maximum zone target
+
+This prevents the main climate from shutting down completely while maintaining efficiency.
+
 ### Valve Control Logic with Hysteresis
 
 #### Heating Mode
@@ -166,6 +215,28 @@ For each zone in heating mode, the integration uses a hysteresis band to prevent
 - Valve opens when temperature < 20.5°C
 - Valve closes when temperature > 21.2°C
 - Between 20.5°C and 21.2°C, valve maintains its current state
+
+#### Physical Close Anticipation
+To prevent temperature overshoot, the integration can close physical valves early:
+
+- **Physical close threshold** = `(target + closing_offset) - physical_close_anticipation`
+- **Default**: 0.6°C anticipation
+- When a valve closes early, it cannot reopen for the configured valve transition delay period
+
+**Example with target = 21°C, closing_offset = 0.2°C, anticipation = 0.6°C:**
+- Normal close threshold: 21.2°C
+- Physical close threshold: 21.2 - 0.6 = **20.6°C**
+- Valve closes at 20.6°C instead of 21.2°C, preventing overshoot
+- Reopen suppressed for 60s (default valve transition delay)
+
+#### Valve Transition Delay
+To ensure pump safety and smooth operation, the integration uses two-phase valve control:
+
+1. **Phase 1**: Open valves that need to be turned on
+2. **Wait**: Sleep for the configured valve transition delay (default: 60 seconds)
+3. **Phase 2**: Close valves that need to be turned off
+
+This ensures the pump always has adequate flow during transitions and prevents water hammer effects.
 
 #### Cooling Mode
 When the integration is in cooling mode (if main climate supports it):
@@ -192,11 +263,9 @@ Fallback zones serve two critical purposes:
 - All zones are satisfied (temperature reached) - fallback valves stay open
 - Cooling mode is active - only fallback valves stay open
 - System transitions between modes - fallback valves provide continuity
-- Valve closes when temperature > 21.2°C
-- Between 20.5°C and 21.2°C, valve maintains its current state
-4. Ensures the configured minimum number of valves remain open
+- Ensures the configured minimum number of valves remain open
 
-All valve operations are executed asynchronously in parallel for maximum efficiency.
+All valve operations are executed asynchronously for maximum efficiency.
 
 ### Safety Features
 
