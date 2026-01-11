@@ -626,102 +626,25 @@ class MultizoneHeaterClimate(ClimateEntity):
         if not self._main_climate_entity:
             return
         
-        # Collect zone data for main climate calculation
-        # Reading zone states is safe without lock as we only read, don't modify
-        zone_targets = []
-        per_zone_desired_main = []
-        zones_needing_action = []
+        # Calculate desired main climate target using helper method
+        desired_main, is_holding_mode = self._calculate_desired_main_target()
         
-        for zone in self._zones:
-            # Get temperature from zone climate or sensor
-            current_temp = self._get_zone_temperature(zone)
-            if current_temp is None:
-                continue
-            
-            valve_entity = zone.get(CONF_VALVE_SWITCH)
-            virtual_switch = zone.get(CONF_VIRTUAL_SWITCH)
-            
-            if not valve_entity:
-                continue
-            
-            # Get zone target temperature
-            zone_target = self._get_zone_target_temperature(zone)
-            zone_targets.append(zone_target)
-            
-            # Calculate compensation-based desired main temperature
-            deficit = zone_target - current_temp
-            
-            # Check if zone needs action
-            check_entity = virtual_switch if virtual_switch else valve_entity
-            target_offset = zone.get(CONF_TARGET_TEMP_OFFSET, DEFAULT_TARGET_TEMP_OFFSET)
-            target_offset_closing = zone.get(CONF_TARGET_TEMP_OFFSET_CLOSING, DEFAULT_TARGET_TEMP_OFFSET_CLOSING)
-            
-            check_state = self.hass.states.get(check_entity)
-            is_currently_open = check_state and check_state.state == STATE_ON
-            
-            if self._hvac_mode == HVACMode.HEAT:
-                zone_desired_main = zone_target + self._compensation_factor * deficit
-                
-                # Determine if zone needs heating
-                if is_currently_open:
-                    physical_close_threshold = zone_target + target_offset_closing - self._physical_close_anticipation
-                    needs_action = current_temp < physical_close_threshold
-                else:
-                    needs_action = current_temp < (zone_target - target_offset)
-            else:  # COOL mode
-                zone_desired_main = zone_target + self._compensation_factor * deficit
-                
-                # Determine if zone needs cooling
-                if is_currently_open:
-                    needs_action = current_temp > (zone_target - target_offset_closing)
-                else:
-                    needs_action = current_temp > (zone_target + target_offset)
-            
-            if needs_action:
-                zones_needing_action.append(valve_entity)
-                per_zone_desired_main.append(zone_desired_main)
-        
-        # Calculate desired main climate target
-        desired_main = None
-        if zones_needing_action and per_zone_desired_main:
-            # Zones need action - use compensation-based target
-            if self._hvac_mode == HVACMode.HEAT:
-                desired_main = max(per_zone_desired_main)
-            else:  # COOL
-                desired_main = min(per_zone_desired_main)
-            
-            _LOGGER.debug(
-                "Main climate update: %d zones need action, desired=%.1f°C (mode=%s)",
-                len(zones_needing_action),
-                desired_main,
-                self._hvac_mode,
-            )
-        elif zone_targets:
-            # All zones satisfied - use slider-based interpolation
-            min_target = min(zone_targets)
-            max_target = max(zone_targets)
-            avg_target = sum(zone_targets) / len(zone_targets)
-            
-            weight = self._all_satisfied_mode
-            if weight <= 50:
-                ratio = weight / 50.0
-                desired_main = min_target + (avg_target - min_target) * ratio
+        # Log the mode and target
+        if desired_main is not None:
+            if is_holding_mode:
+                _LOGGER.debug(
+                    "Main climate update: Holding mode (all zones satisfied), desired=%.1f°C (slider=%d%%)",
+                    desired_main,
+                    self._all_satisfied_mode,
+                )
             else:
-                ratio = (weight - 50) / 50.0
-                desired_main = avg_target + (max_target - avg_target) * ratio
-            
-            _LOGGER.debug(
-                "Main climate update: All zones satisfied, desired=%.1f°C (slider=%d%%)",
-                desired_main,
-                weight,
-            )
+                _LOGGER.debug(
+                    "Main climate update: Heating mode (zones need action), desired=%.1f°C",
+                    desired_main,
+                )
         
         # Update main climate target if needed
         if desired_main is not None:
-            # Round to 0.1°C and clamp to configured range
-            desired_main = round(desired_main, 1)
-            desired_main = max(self._main_min_temp, min(self._main_max_temp, desired_main))
-            
             # Only update if change exceeds threshold
             if self._last_main_target is None or abs(desired_main - self._last_main_target) >= self._main_change_threshold:
                 last_target_display = self._last_main_target if self._last_main_target is not None else 0.0
@@ -750,6 +673,135 @@ class MultizoneHeaterClimate(ClimateEntity):
                         err,
                     )
 
+    def _get_zone_satisfaction_bounds(
+        self, zone_target: float, target_offset: float, target_offset_closing: float
+    ) -> tuple[float, float]:
+        """Calculate satisfaction bounds for a zone based on HVAC mode.
+        
+        Args:
+            zone_target: Target temperature for the zone
+            target_offset: Opening offset (threshold below target for heating, above for cooling)
+            target_offset_closing: Closing offset (threshold above target for heating, below for cooling)
+            
+        Returns:
+            Tuple of (lower_bound, upper_bound) defining the satisfaction range
+        """
+        if self._hvac_mode == HVACMode.HEAT:
+            # Heating: satisfied range is [target - opening_offset, target + closing_offset]
+            lower_bound = zone_target - target_offset
+            upper_bound = zone_target + target_offset_closing
+        else:  # COOL mode
+            # Cooling: satisfied range is [target - closing_offset, target + opening_offset]
+            lower_bound = zone_target - target_offset_closing
+            upper_bound = zone_target + target_offset
+        
+        return lower_bound, upper_bound
+
+    def _get_zone_status(
+        self, current_temp: float, lower_bound: float, upper_bound: float
+    ) -> str:
+        """Determine zone satisfaction status based on temperature and bounds.
+        
+        Args:
+            current_temp: Current zone temperature
+            lower_bound: Lower bound of satisfaction range
+            upper_bound: Upper bound of satisfaction range
+            
+        Returns:
+            Status string: 'underheated', 'overheated', 'satisfied', or 'undercooled'
+        """
+        if self._hvac_mode == HVACMode.HEAT:
+            if current_temp < lower_bound:
+                return "underheated"
+            elif current_temp > upper_bound:
+                return "overheated"
+            else:
+                return "satisfied"
+        else:  # COOL mode
+            if current_temp > upper_bound:
+                return "overheated"
+            elif current_temp < lower_bound:
+                return "undercooled"
+            else:
+                return "satisfied"
+
+    def _calculate_desired_main_target(self) -> tuple[float | None, bool]:
+        """Calculate desired main climate target without updating it.
+        
+        Returns:
+            Tuple of (desired_main_temp, is_holding_mode)
+            - desired_main_temp: Calculated target temperature for main climate, or None
+            - is_holding_mode: True if all zones are satisfied/overheated (holding mode),
+                              False if any zone is underheated (heating mode)
+        """
+        zone_targets = []
+        per_zone_desired_main = []
+        zones_needing_action = []
+        
+        for zone in self._zones:
+            current_temp = self._get_zone_temperature(zone)
+            if current_temp is None:
+                continue
+            
+            valve_entity = zone.get(CONF_VALVE_SWITCH)
+            if not valve_entity:
+                continue
+            
+            zone_target = self._get_zone_target_temperature(zone)
+            zone_targets.append(zone_target)
+            
+            target_offset = zone.get(CONF_TARGET_TEMP_OFFSET, DEFAULT_TARGET_TEMP_OFFSET)
+            target_offset_closing = zone.get(CONF_TARGET_TEMP_OFFSET_CLOSING, DEFAULT_TARGET_TEMP_OFFSET_CLOSING)
+            
+            # Calculate compensation-based desired main temperature
+            deficit = zone_target - current_temp
+            zone_desired_main = zone_target + self._compensation_factor * deficit
+            
+            # Get satisfaction bounds
+            lower_bound, upper_bound = self._get_zone_satisfaction_bounds(
+                zone_target, target_offset, target_offset_closing
+            )
+            
+            # Zone needs action if outside satisfaction range (underheated or overheated)
+            needs_action = current_temp < lower_bound or current_temp > upper_bound
+            
+            if needs_action:
+                zones_needing_action.append(valve_entity)
+                per_zone_desired_main.append(zone_desired_main)
+        
+        # Calculate desired main climate target
+        desired_main = None
+        is_holding_mode = False
+        
+        if zones_needing_action and per_zone_desired_main:
+            # Heating mode: zones need action - use compensation-based target
+            if self._hvac_mode == HVACMode.HEAT:
+                desired_main = max(per_zone_desired_main)
+            else:  # COOL
+                desired_main = min(per_zone_desired_main)
+            is_holding_mode = False
+        elif zone_targets:
+            # Holding mode: All zones satisfied - use slider-based interpolation
+            min_target = min(zone_targets)
+            max_target = max(zone_targets)
+            avg_target = sum(zone_targets) / len(zone_targets)
+            
+            weight = self._all_satisfied_mode
+            if weight <= 50:
+                ratio = weight / 50.0
+                desired_main = min_target + (avg_target - min_target) * ratio
+            else:
+                ratio = (weight - 50) / 50.0
+                desired_main = avg_target + (max_target - avg_target) * ratio
+            is_holding_mode = True
+        
+        if desired_main is not None:
+            # Round and clamp to configured range
+            desired_main = round(desired_main, 1)
+            desired_main = max(self._main_min_temp, min(self._main_max_temp, desired_main))
+        
+        return desired_main, is_holding_mode
+
     async def _async_control_valves(self) -> None:
         """Control valve states based on zone temperatures.
         
@@ -762,6 +814,10 @@ class MultizoneHeaterClimate(ClimateEntity):
                 return
 
             current_time = time.time()
+            
+            # First, calculate what the main climate target would be
+            # This is needed to determine valve state for satisfied zones
+            desired_main_target, is_holding_mode = self._calculate_desired_main_target()
             
             # Collect zone data and determine which valves should be open
             zones_needing_action = []
@@ -790,52 +846,101 @@ class MultizoneHeaterClimate(ClimateEntity):
                 check_state = self.hass.states.get(check_entity)
                 is_currently_open = check_state and check_state.state == STATE_ON
 
+                # Get satisfaction bounds using helper method
+                lower_bound, upper_bound = self._get_zone_satisfaction_bounds(
+                    zone_target, target_offset, target_offset_closing
+                )
+
+                # Get zone status
+                zone_status = self._get_zone_status(current_temp, lower_bound, upper_bound)
+
                 # Determine if valve should be open with hysteresis
                 if self._hvac_mode == HVACMode.HEAT:
-                    if is_currently_open:
-                        # Use closing offset for already-open valves
-                        # Apply physical close anticipation for early closing
-                        physical_close_threshold = zone_target + target_offset_closing - self._physical_close_anticipation
-                        should_open = current_temp < physical_close_threshold
+                    if zone_status == "underheated":
+                        # Zone needs heat - always open valve
+                        should_open = True
                         
-                        # If closing early, set reopen suppression
-                        if not should_open and current_temp < (zone_target + target_offset_closing):
-                            self._valve_no_reopen_until[valve_entity] = current_time + self._valve_transition_delay
-                            _LOGGER.debug(
-                                "Zone %s: Early physical close at %.1f°C (threshold %.1f°C), reopen suppressed for %ds",
-                                zone.get(CONF_ZONE_NAME, valve_entity),
-                                current_temp,
-                                physical_close_threshold,
-                                self._valve_transition_delay,
-                            )
-                    else:
-                        # Use opening offset for closed valves
-                        should_open = current_temp < (zone_target - target_offset)
-                        
-                        # Check reopen suppression
-                        if should_open and valve_entity in self._valve_no_reopen_until:
+                        # Check reopen suppression for closed valves
+                        if not is_currently_open and valve_entity in self._valve_no_reopen_until:
                             if current_time < self._valve_no_reopen_until[valve_entity]:
                                 should_open = False
                                 _LOGGER.debug(
-                                    "Zone %s: Reopen suppressed for %.0fs",
+                                    "Zone %s: Underheated but reopen suppressed for %.0fs",
                                     zone.get(CONF_ZONE_NAME, valve_entity),
                                     self._valve_no_reopen_until[valve_entity] - current_time,
                                 )
                             else:
                                 # Suppression expired
                                 del self._valve_no_reopen_until[valve_entity]
+                    
+                    elif zone_status == "overheated":
+                        # Zone is overheated - always close valve
+                        should_open = False
+                    
+                    else:  # zone_status == "satisfied"
+                        # Zone is satisfied - decision depends on mode and main climate target
+                        if is_holding_mode:
+                            # Holding mode: all zones satisfied/overheated - open valve to maintain temp
+                            should_open = True
+                        elif desired_main_target is not None:
+                            # Heating mode: some zones need heat
+                            # Open valve only if zone target >= main target (won't overheat)
+                            should_open = zone_target >= desired_main_target
+                            
+                            _LOGGER.debug(
+                                "Zone %s: Satisfied in heating mode, zone_target=%.1f°C, main_target=%.1f°C, should_open=%s",
+                                zone.get(CONF_ZONE_NAME, valve_entity),
+                                zone_target,
+                                desired_main_target,
+                                should_open,
+                            )
+                        else:
+                            # No main target calculated - close valve to be safe
+                            should_open = False
+                        
+                        # Apply physical close anticipation for open valves
+                        if is_currently_open and should_open:
+                            physical_close_threshold = upper_bound - self._physical_close_anticipation
+                            if current_temp >= physical_close_threshold:
+                                should_open = False
+                                
+                                # Set reopen suppression if closing early
+                                if current_temp < upper_bound:
+                                    self._valve_no_reopen_until[valve_entity] = current_time + self._valve_transition_delay
+                                    _LOGGER.debug(
+                                        "Zone %s: Early physical close at %.1f°C (threshold %.1f°C), reopen suppressed for %ds",
+                                        zone.get(CONF_ZONE_NAME, valve_entity),
+                                        current_temp,
+                                        physical_close_threshold,
+                                        self._valve_transition_delay,
+                                    )
+                
                 else:  # COOL mode
-                    # For cooling, inverse logic
-                    if is_currently_open:
-                        should_open = current_temp > (zone_target - target_offset_closing)
-                    else:
-                        should_open = current_temp > (zone_target + target_offset)
+                    if zone_status == "overheated":
+                        # Zone needs cooling - open valve
+                        should_open = True
+                    elif zone_status == "undercooled":
+                        # Zone is too cold - close valve
+                        should_open = False
+                    else:  # satisfied
+                        # In cooling mode, use similar logic as heating
+                        if is_holding_mode:
+                            should_open = True
+                        elif desired_main_target is not None:
+                            # Open valve only if zone target <= main target
+                            should_open = zone_target <= desired_main_target
+                        else:
+                            should_open = False
                 
                 _LOGGER.debug(
-                    "Zone %s: temp=%.1f°C, target=%.1f°C, should_open=%s",
+                    "Zone %s: temp=%.1f°C, target=%.1f°C, range=[%.1f, %.1f]°C, status=%s, mode=%s, should_open=%s",
                     zone.get(CONF_ZONE_NAME, valve_entity),
                     current_temp,
                     zone_target,
+                    lower_bound,
+                    upper_bound,
+                    zone_status,
+                    "holding" if is_holding_mode else "heating",
                     should_open,
                 )
                 
