@@ -40,7 +40,6 @@ from .const import (
     CONF_PHYSICAL_CLOSE_ANTICIPATION,
     CONF_TARGET_TEMP_OFFSET,
     CONF_TARGET_TEMP_OFFSET_CLOSING,
-    CONF_TEMPERATURE_AGGREGATION_WEIGHT,
     CONF_TEMPERATURE_SENSOR,
     CONF_VALVE_SWITCH,
     CONF_VALVE_TRANSITION_DELAY,
@@ -59,7 +58,6 @@ from .const import (
     DEFAULT_RECONCILIATION_INTERVAL,
     DEFAULT_TARGET_TEMP_OFFSET,
     DEFAULT_TARGET_TEMP_OFFSET_CLOSING,
-    DEFAULT_TEMPERATURE_AGGREGATION_WEIGHT,
     DEFAULT_VALVE_TRANSITION_DELAY,
     DEFAULT_ZONE_TARGET_CHANGE_DELAY,
     DOMAIN,
@@ -79,9 +77,6 @@ async def async_setup_entry(
     zones = config.get(CONF_ZONES, [])
     main_climate = config.get(CONF_MAIN_CLIMATE)
     main_temp_sensor = config.get(CONF_MAIN_TEMP_SENSOR)
-    temperature_aggregation_weight = config.get(
-        CONF_TEMPERATURE_AGGREGATION_WEIGHT, DEFAULT_TEMPERATURE_AGGREGATION_WEIGHT
-    )
     min_valves_open = config.get(CONF_MIN_VALVES_OPEN, DEFAULT_MIN_VALVES_OPEN)
     fallback_zones = config.get(CONF_FALLBACK_ZONES, [])
     compensation_factor = config.get(CONF_COMPENSATION_FACTOR, DEFAULT_COMPENSATION_FACTOR)
@@ -99,7 +94,6 @@ async def async_setup_entry(
             zones,
             main_climate,
             main_temp_sensor,
-            temperature_aggregation_weight,
             min_valves_open,
             fallback_zones,
             compensation_factor,
@@ -136,7 +130,6 @@ class MultizoneHeaterClimate(ClimateEntity):
         zones: list[dict[str, Any]],
         main_climate: str | None,
         main_temp_sensor: str | None,
-        temperature_aggregation_weight: int,
         min_valves_open: int,
         fallback_zones: list[str],
         compensation_factor: float,
@@ -153,7 +146,6 @@ class MultizoneHeaterClimate(ClimateEntity):
         self._zones = zones
         self._main_climate_entity = main_climate
         self._main_temp_sensor = main_temp_sensor
-        self._temperature_aggregation_weight = temperature_aggregation_weight
         # Ensure min_valves_open is always an integer to prevent TypeError in range()
         # Convert to int to handle cases where it may have been stored as a float
         try:
@@ -331,7 +323,22 @@ class MultizoneHeaterClimate(ClimateEntity):
         if self._main_climate_entity:
             @callback
             def async_climate_changed(event):
-                """Handle main climate changes."""
+                """Handle main climate changes.
+                
+                When main climate HVAC mode changes to OFF, close all valves except fallback zones.
+                When main climate is in any other mode, manage valves normally.
+                """
+                # Get the new state
+                new_state = event.data.get("new_state")
+                if new_state:
+                    main_hvac_mode = new_state.state
+                    _LOGGER.debug("Main climate HVAC mode changed to: %s", main_hvac_mode)
+                    
+                    # If main climate is OFF, close all valves except fallback zones
+                    if main_hvac_mode == HVACMode.OFF:
+                        _LOGGER.info("Main climate is OFF - closing all valves except fallback zones")
+                        self.hass.async_create_task(self._async_close_valves_except_fallback())
+                
                 self.async_schedule_update_ha_state(True)
 
             self.async_on_remove(
@@ -433,73 +440,20 @@ class MultizoneHeaterClimate(ClimateEntity):
         self.async_write_ha_state()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        """Set new target hvac mode."""
+        """Set new target hvac mode for this integration.
+        
+        Note: This sets the multizone heater's mode, NOT the main climate.
+        The main climate HVAC mode is managed externally by the user.
+        """
         self._hvac_mode = hvac_mode
 
         if hvac_mode == HVACMode.OFF:
-            # Turn off all valves except minimum required
+            # Turn off all valves except fallback zones
             await self._async_turn_off_all_valves()
-            
-            # Turn off main climate if configured
-            if self._main_climate_entity:
-                try:
-                    await self.hass.services.async_call(
-                        "climate",
-                        "set_hvac_mode",
-                        {
-                            "entity_id": self._main_climate_entity,
-                            "hvac_mode": HVACMode.OFF,
-                        },
-                        blocking=True,
-                    )
-                except Exception as err:
-                    _LOGGER.error(
-                        "Failed to turn off main climate %s: %s",
-                        self._main_climate_entity,
-                        err,
-                    )
         elif hvac_mode == HVACMode.HEAT:
-            # Turn on main climate if configured
-            if self._main_climate_entity:
-                try:
-                    await self.hass.services.async_call(
-                        "climate",
-                        "set_hvac_mode",
-                        {
-                            "entity_id": self._main_climate_entity,
-                            "hvac_mode": HVACMode.HEAT,
-                        },
-                        blocking=True,
-                    )
-                except Exception as err:
-                    _LOGGER.error(
-                        "Failed to turn on main climate %s: %s",
-                        self._main_climate_entity,
-                        err,
-                    )
-            
             # Control valves based on zone temperatures
             await self._async_control_valves()
         elif hvac_mode == HVACMode.COOL:
-            # Turn on main climate in cooling mode if configured
-            if self._main_climate_entity:
-                try:
-                    await self.hass.services.async_call(
-                        "climate",
-                        "set_hvac_mode",
-                        {
-                            "entity_id": self._main_climate_entity,
-                            "hvac_mode": HVACMode.COOL,
-                        },
-                        blocking=True,
-                    )
-                except Exception as err:
-                    _LOGGER.error(
-                        "Failed to set cooling on main climate %s: %s",
-                        self._main_climate_entity,
-                        err,
-                    )
-            
             # Open fallback zone valves, close others during cooling
             await self._async_control_valves_for_cooling()
 
@@ -507,31 +461,35 @@ class MultizoneHeaterClimate(ClimateEntity):
 
     async def async_update(self) -> None:
         """Update the entity."""
-        # Calculate aggregated current temperature
-        temperatures = []
-        for zone in self._zones:
-            temp = self._get_zone_temperature(zone)
-            if temp is not None:
-                temperatures.append(temp)
-
-        if temperatures:
-            # Use weight-based aggregation (0% = min, 50% = avg, 100% = max)
-            min_temp = min(temperatures)
-            max_temp = max(temperatures)
-            avg_temp = sum(temperatures) / len(temperatures)
-            
-            # Interpolate between min and avg (0-50%) or avg and max (50-100%)
-            weight = self._temperature_aggregation_weight
-            if weight <= 50:
-                # Interpolate between min and avg
-                ratio = weight / 50.0
-                self._current_temperature = min_temp + (avg_temp - min_temp) * ratio
-            else:
-                # Interpolate between avg and max
-                ratio = (weight - 50) / 50.0
-                self._current_temperature = avg_temp + (max_temp - avg_temp) * ratio
-        else:
-            self._current_temperature = None
+        # Get current temperature from main climate entity or main temp sensor
+        # (not from zones - main climate has its own sensor in corridor)
+        self._current_temperature = None
+        
+        # First try main temp sensor override if configured
+        if self._main_temp_sensor:
+            sensor_state = self.hass.states.get(self._main_temp_sensor)
+            if sensor_state and sensor_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                try:
+                    self._current_temperature = float(sensor_state.state)
+                except (ValueError, TypeError):
+                    _LOGGER.warning(
+                        "Unable to parse temperature from main sensor %s",
+                        self._main_temp_sensor,
+                    )
+        
+        # Fall back to main climate entity's current temperature
+        if self._current_temperature is None and self._main_climate_entity:
+            climate_state = self.hass.states.get(self._main_climate_entity)
+            if climate_state and climate_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                temp_attr = climate_state.attributes.get("current_temperature")
+                if temp_attr is not None:
+                    try:
+                        self._current_temperature = float(temp_attr)
+                    except (ValueError, TypeError):
+                        _LOGGER.warning(
+                            "Unable to parse current temperature from main climate %s",
+                            self._main_climate_entity,
+                        )
 
         # Update HVAC action
         if self._hvac_mode == HVACMode.OFF:
@@ -1198,3 +1156,50 @@ class MultizoneHeaterClimate(ClimateEntity):
                 len(fallback_valve_entities),
                 len(all_valve_entities) - len(fallback_valve_entities)
             )
+
+    async def _async_close_valves_except_fallback(self) -> None:
+        """Close all valves except fallback zones.
+        
+        This is called when the main climate HVAC mode is OFF.
+        We keep fallback zones open to maintain pump safety.
+        """
+        async with self._update_lock:
+            tasks = []
+            fallback_valve_entities = []
+            
+            # Get fallback zone valve entities
+            for zone in self._zones:
+                zone_name = zone.get(CONF_ZONE_NAME)
+                if zone_name in self._fallback_zone_names:
+                    valve_entity = zone.get(CONF_VALVE_SWITCH)
+                    if valve_entity:
+                        fallback_valve_entities.append(valve_entity)
+
+            # Get all valve entities
+            all_valve_entities = [zone.get(CONF_VALVE_SWITCH) for zone in self._zones if zone.get(CONF_VALVE_SWITCH)]
+            
+            # Get current valve states
+            current_valve_states = await self._async_get_valve_states()
+
+            # Close all non-fallback valves
+            for valve_entity in all_valve_entities:
+                if valve_entity not in fallback_valve_entities:
+                    if current_valve_states.get(valve_entity):
+                        domain = valve_entity.split('.')[0] if '.' in valve_entity else 'switch'
+                        tasks.append(
+                            self._async_call_service_with_error_handling(
+                                domain,
+                                SERVICE_TURN_OFF,
+                                {"entity_id": valve_entity},
+                                f"turn off valve {valve_entity} (main climate is OFF)",
+                            )
+                        )
+
+            # Execute all valve changes in parallel
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+                _LOGGER.info(
+                    "Main climate OFF: Closed %d non-fallback valve(s), keeping %d fallback valve(s) open",
+                    len(tasks),
+                    len(fallback_valve_entities)
+                )

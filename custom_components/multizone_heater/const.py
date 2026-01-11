@@ -13,7 +13,6 @@ CONF_TARGET_TEMP_OFFSET = "target_temp_offset"
 CONF_TARGET_TEMP_OFFSET_CLOSING = "target_temp_offset_closing"
 CONF_MAIN_CLIMATE = "main_climate"
 CONF_MAIN_TEMP_SENSOR = "main_temp_sensor"
-CONF_TEMPERATURE_AGGREGATION_WEIGHT = "temperature_aggregation_weight"
 CONF_MIN_VALVES_OPEN = "min_valves_open"
 CONF_FALLBACK_ZONES = "fallback_zones"
 CONF_COMPENSATION_FACTOR = "compensation_factor"
@@ -27,7 +26,6 @@ CONF_ALL_SATISFIED_MODE = "all_satisfied_mode"
 # Defaults
 DEFAULT_TARGET_TEMP_OFFSET = 0.5
 DEFAULT_TARGET_TEMP_OFFSET_CLOSING = 0.0
-DEFAULT_TEMPERATURE_AGGREGATION_WEIGHT = 50  # 0-100%, where 0=min, 50=avg, 100=max
 DEFAULT_MIN_VALVES_OPEN = 1
 DEFAULT_HVAC_ACTION_DEADBAND = 0.5  # Temperature deadband for HVAC action determination
 DEFAULT_COMPENSATION_FACTOR = 0.66  # Corridor compensation factor

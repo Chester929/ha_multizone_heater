@@ -4,30 +4,28 @@ Home Assistant custom integration to efficiently manage multizone heating/coolin
 
 ## Overview
 
-This integration provides an efficient, asynchronous Python-based solution for managing multizone heating and cooling systems. Unlike blueprint-based automations, this integration leverages Home Assistant's native async capabilities for better performance, more responsive control, and advanced features like zone climate coordination and cooling mode support.
+This integration provides an efficient, asynchronous Python-based solution for managing multizone heating and cooling systems. It monitors your main climate entity (boiler/HVAC) and intelligently controls individual zone valves based on zone temperatures and the main climate's operating state.
 
 ## Features
 
 ### Core Functionality
-- **Async Operation**: All valve control operations are executed asynchronously in parallel for maximum performance
+- **Main Climate Monitoring**: Respects and monitors your main climate entity (boiler) - does not control its HVAC mode
+- **Temperature Display**: Uses the main climate's temperature sensor (typically in corridor) for accurate display
+- **Smart Valve Control**: Manages individual zone valves based on zone temperatures and main climate state
 - **Multiple Zone Support**: Configure unlimited heating/cooling zones, each with its own temperature sensor and valve
 - **Zone Climate Entities**: Support for zone climate entities (e.g., Generic Thermostat) with virtual switch pattern to prevent conflicts
-- **Temperature Aggregation**: Choose how to aggregate zone temperatures (average, minimum, maximum, or percentage-based)
-- **Cooling Mode Support**: Automatically detects and supports cooling if main climate entity has cooling capability
-- **Safety Features**: Ensures a minimum number of valves remain open to protect heating systems
-- **Fallback Zones**: Mandatory fallback zones ensure pump safety during cooling and when all zones are satisfied
-- **Main Climate Integration**: Optional integration with a main climate entity for coordinated control
+- **Safety Features**: Ensures fallback zones remain open to protect heating systems when main climate is OFF
+- **Fallback Zones**: Mandatory fallback zones ensure pump safety during cooling and when main climate is OFF
 - **UI Configuration**: Easy setup through Home Assistant's configuration UI (no YAML required)
-- **Real-time Updates**: Instant response to temperature changes across all zones via event-driven architecture
+- **Real-time Updates**: Instant response to temperature and main climate state changes via event-driven architecture
 
 ### Advanced Features
 - **Valve Hysteresis**: Separate opening and closing temperature offsets prevent rapid valve cycling
-- **Percentage-Based Aggregation**: Fine-tune temperature calculation with 0-100% slider (0%=min, 50%=avg, 100%=max)
 - **Virtual Switch Pattern**: Clean separation between zone climate control and physical valve control
 - **Input Validation**: Prevents duplicate entity usage across zones
 - **Error Handling**: Comprehensive error handling for all service calls
 - **Temperature Unit Support**: Automatically uses Home Assistant's configured temperature unit
-- **Intelligent Main Climate Compensation**: Per-zone compensation logic calculates optimal main climate target based on actual zone needs
+- **Intelligent Main Climate Target Control**: Per-zone compensation logic calculates optimal main climate target based on actual zone needs
 - **Valve Transition Delay**: Two-phase valve operation prevents pump issues by opening valves before closing others
 - **Physical Close Anticipation**: Early valve closing prevents temperature overshoot with reopen suppression
 - **All-Satisfied Slider**: Configurable main climate target when all zones are satisfied (interpolates between min/avg/max)
@@ -60,12 +58,8 @@ This integration provides an efficient, asynchronous Python-based solution for m
 4. Follow the configuration steps:
    
    - **Step 1: Main Settings**
-     - **Main Climate Entity** (optional): Select your main climate/thermostat entity (e.g., boiler controller)
-     - **Main Temperature Sensor** (optional): Override main climate's temperature reading with a specific sensor
-     - **Current Temperature Calculation** (slider 0-100%): How to calculate the displayed current temperature from all zones
-       - 0% = Use coldest zone temperature (ensures all zones get heated)
-       - 50% = Use average temperature (balanced approach, default)
-       - 100% = Use warmest zone temperature (energy efficient)
+     - **Main Climate Entity** (required): Select your main climate/thermostat entity (boiler controller). Its temperature sensor will be used for display.
+     - **Main Temperature Sensor Override** (optional): Override the main climate's temperature sensor with a specific sensor
      - **Main Target When All Zones Satisfied** (slider 0-100%): What to set the main climate target when all zones have reached their targets
        - 0% = Use lowest zone target (energy efficient)
        - 50% = Use average zone target (balanced approach, default)
@@ -158,26 +152,24 @@ automation:
 
 ## How It Works
 
-### Temperature Aggregation
+### Temperature Display
 
-The integration monitors temperature sensors in all configured zones and aggregates them using the **Current Temperature Calculation** slider (0-100%):
+The integration displays the current temperature from your **main climate entity's temperature sensor** (typically located in the corridor). This provides an accurate reading of the central heating system's performance.
 
-- **0%**: Uses the **coldest zone** temperature
-  - Best for ensuring all zones reach their target temperature
-  - The system will keep heating until even the coldest zone is warm
-  
-- **50%** (default): Uses the **average** temperature across all zones
-  - Balanced approach between comfort and efficiency
-  - Most common setting for typical homes
-  
-- **100%**: Uses the **warmest zone** temperature
-  - Most energy efficient setting
-  - May result in some zones not reaching target if they heat unevenly
+- If a **Main Temperature Sensor Override** is configured, it uses that sensor instead
+- Otherwise, it reads the temperature from the main climate entity itself
+- Individual zone temperatures are used for valve control, not for display
 
-- **Values between**: Smoothly interpolate between these extremes
-  - For example, 25% is halfway between coldest and average
+**Important:** The integration does NOT aggregate zone temperatures. It shows the actual corridor/main temperature as reported by your main climate entity.
 
-**Important Note:** This slider controls what temperature is **displayed** on the climate entity and affects when the system reports it is heating/cooling/idle. It does NOT control individual valve operation - each valve operates based on its own zone's actual temperature.
+### Main Climate HVAC Mode Monitoring
+
+The integration **monitors** (does not control) the main climate's HVAC mode:
+
+- **When main climate is OFF**: Closes all valves except fallback zones for pump safety
+- **When main climate is HEAT/COOL/IDLE**: Manages valves normally based on zone temperatures
+- You control the main climate's HVAC mode externally (manually or via other automations)
+- The integration only updates the main climate's **target temperature**, not its HVAC mode
 
 ### Main Climate Compensation Logic
 
@@ -224,10 +216,6 @@ When all zones are satisfied (no heating/cooling needed), the integration uses t
   - Fastest response when zones need heat again
 
 **Why is this needed?** This prevents the main climate from shutting down completely while maintaining efficiency. When all zones are satisfied, the boiler needs a target temperature to maintain - this slider controls what that target is.
-
-**Difference from Current Temperature Calculation:**
-- **Current Temperature Calculation**: Controls what temperature is DISPLAYED (affects current_temperature reading)
-- **Main Target When All Zones Satisfied**: Controls what the MAIN BOILER target is set to when zones don't need heating (affects main climate entity operation only)
 
 ### Valve Control Logic with Hysteresis
 
