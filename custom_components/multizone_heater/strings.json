@@ -1,0 +1,41 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Multizone Heater",
+        "description": "Configure the main climate entity and aggregation settings.",
+        "data": {
+          "main_climate": "Main Climate Entity (optional)",
+          "temperature_aggregation": "Temperature Aggregation Method",
+          "min_valves_open": "Minimum Valves Open"
+        }
+      },
+      "add_zone": {
+        "title": "Add Heating Zone",
+        "description": "Add a heating zone with temperature sensor and valve.",
+        "data": {
+          "zone_name": "Zone Name",
+          "temperature_sensor": "Temperature Sensor",
+          "valve_switch": "Valve Switch",
+          "target_temp_offset": "Target Temperature Offset (°C)",
+          "add_another": "Add Another Zone"
+        }
+      }
+    },
+    "error": {
+      "no_zones": "At least one zone must be configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Multizone Heater Options",
+        "description": "Configure options for the multizone heater.",
+        "data": {
+          "temperature_aggregation": "Temperature Aggregation Method",
+          "min_valves_open": "Minimum Valves Open"
+        }
+      }
+    }
+  }
+}

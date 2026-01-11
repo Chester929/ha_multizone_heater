@@ -1,0 +1,12 @@
+{
+  "domain": "multizone_heater",
+  "name": "Multizone Heater",
+  "version": "1.0.0",
+  "documentation": "https://github.com/Chester929/ha_multizone_heater",
+  "codeowners": ["@Chester929"],
+  "requirements": [],
+  "dependencies": [],
+  "config_flow": true,
+  "iot_class": "calculated",
+  "integration_type": "hub"
+}
