@@ -114,19 +114,20 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Validate main_min_temp < main_max_temp
             if self._main_min_temp >= self._main_max_temp:
                 errors["base"] = "invalid_temp_range"
-                
-            self._main_change_threshold = user_input.get(
-                CONF_MAIN_CHANGE_THRESHOLD, DEFAULT_MAIN_CHANGE_THRESHOLD
-            )
-            self._physical_close_anticipation = user_input.get(
-                CONF_PHYSICAL_CLOSE_ANTICIPATION, DEFAULT_PHYSICAL_CLOSE_ANTICIPATION
-            )
-            self._all_satisfied_mode = user_input.get(
-                CONF_ALL_SATISFIED_MODE, DEFAULT_ALL_SATISFIED_MODE
-            )
+                # Don't process further if validation fails
+            else:
+                self._main_change_threshold = user_input.get(
+                    CONF_MAIN_CHANGE_THRESHOLD, DEFAULT_MAIN_CHANGE_THRESHOLD
+                )
+                self._physical_close_anticipation = user_input.get(
+                    CONF_PHYSICAL_CLOSE_ANTICIPATION, DEFAULT_PHYSICAL_CLOSE_ANTICIPATION
+                )
+                self._all_satisfied_mode = user_input.get(
+                    CONF_ALL_SATISFIED_MODE, DEFAULT_ALL_SATISFIED_MODE
+                )
 
-            if not errors:
-                return await self.async_step_add_zone()
+                if not errors:
+                    return await self.async_step_add_zone()
 
         data_schema = vol.Schema(
             {
