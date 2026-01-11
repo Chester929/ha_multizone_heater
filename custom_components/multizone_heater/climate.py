@@ -195,9 +195,9 @@ class MultizoneHeaterClimate(ClimateEntity):
         self._valve_no_reopen_until = {}
         # Track last main climate target to avoid unnecessary updates
         self._last_main_target = None
-        # Track pending zone target change for debouncing
-        self._zone_target_change_timer = None
-        self._pending_zone_target_update = False
+        # Track pending timers for debouncing (separate for valve and main climate)
+        self._zone_target_change_valve_timer = None
+        self._zone_target_change_main_timer = None
 
         # Use Home Assistant's configured temperature unit
         self._attr_temperature_unit = hass.config.units.temperature_unit
@@ -265,11 +265,12 @@ class MultizoneHeaterClimate(ClimateEntity):
         def async_sensor_changed(event):
             """Handle temperature sensor changes.
             
-            Triggers valve control which is serialized via _update_lock.
-            Multiple concurrent calls are safe - they will queue and execute sequentially.
+            For zone climate target temperature changes:
+            - Debounces BOTH valve control AND main climate updates (run in parallel)
             
-            Detects target temperature changes in zone climate entities and debounces them
-            to avoid updating main climate for every slider adjustment.
+            For other changes (current temperature, virtual switch):
+            - Triggers valve control immediately
+            - Triggers main climate update immediately
             """
             # Check if this is a target temperature change in a zone climate entity
             is_zone_target_change = False
@@ -288,7 +289,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                             if abs(float(new_target) - float(old_target)) >= 0.01:
                                 is_zone_target_change = True
                                 _LOGGER.debug(
-                                    "Zone climate %s target changed from %.1f to %.1f - debouncing update",
+                                    "Zone climate %s target changed from %.1f to %.1f - debouncing valve and main climate updates",
                                     new_state.entity_id,
                                     float(old_target),
                                     float(new_target),
@@ -298,35 +299,51 @@ class MultizoneHeaterClimate(ClimateEntity):
             
             self.async_schedule_update_ha_state(True)
             
-            # Handle zone target changes with debouncing
             if is_zone_target_change and self._hvac_mode in (HVACMode.HEAT, HVACMode.COOL):
-                # Cancel existing timer if present
-                if self._zone_target_change_timer:
-                    self._zone_target_change_timer.cancel()
+                # For zone target changes, debounce BOTH valve control and main climate update
+                # These run as separate parallel async tasks
                 
-                # Mark that we have a pending update
-                self._pending_zone_target_update = True
+                # Cancel existing valve timer if present
+                if self._zone_target_change_valve_timer and not self._zone_target_change_valve_timer.done():
+                    self._zone_target_change_valve_timer.cancel()
                 
-                # Schedule a delayed valve control update
+                # Cancel existing main climate timer if present
+                if self._zone_target_change_main_timer and not self._zone_target_change_main_timer.done():
+                    self._zone_target_change_main_timer.cancel()
+                
+                # Schedule delayed valve control (independent async task)
                 async def delayed_valve_control():
                     """Execute valve control after debounce delay."""
-                    self._pending_zone_target_update = False
-                    self._zone_target_change_timer = None
-                    _LOGGER.debug("Debounce delay complete - executing valve control")
-                    await self._async_control_valves()
+                    try:
+                        await asyncio.sleep(DEFAULT_ZONE_TARGET_CHANGE_DELAY)
+                        _LOGGER.debug("Valve debounce delay complete - executing valve control")
+                        await self._async_control_valves()
+                    except asyncio.CancelledError:
+                        _LOGGER.debug("Valve debounce timer cancelled - newer target change received")
+                    finally:
+                        self._zone_target_change_valve_timer = None
                 
-                self._zone_target_change_timer = self.hass.async_create_task(
-                    asyncio.sleep(DEFAULT_ZONE_TARGET_CHANGE_DELAY)
-                )
+                # Schedule delayed main climate update (independent async task, runs in parallel)
+                async def delayed_main_climate_update():
+                    """Execute main climate update after debounce delay."""
+                    try:
+                        await asyncio.sleep(DEFAULT_ZONE_TARGET_CHANGE_DELAY)
+                        _LOGGER.debug("Main climate debounce delay complete - updating main climate")
+                        await self._async_update_main_climate()
+                    except asyncio.CancelledError:
+                        _LOGGER.debug("Main climate debounce timer cancelled - newer target change received")
+                    finally:
+                        self._zone_target_change_main_timer = None
                 
-                # Chain the valve control after the sleep
-                self._zone_target_change_timer.add_done_callback(
-                    lambda _: self.hass.async_create_task(delayed_valve_control())
-                )
+                # Create both tasks - they run in parallel
+                self._zone_target_change_valve_timer = self.hass.async_create_task(delayed_valve_control())
+                self._zone_target_change_main_timer = self.hass.async_create_task(delayed_main_climate_update())
+                
             elif self._hvac_mode in (HVACMode.HEAT, HVACMode.COOL):
                 # For non-target changes (temperature sensor updates, virtual switch, etc.)
-                # trigger valve control immediately without debouncing
+                # trigger both valve control and main climate update immediately (in parallel)
                 self.hass.async_create_task(self._async_control_valves())
+                self.hass.async_create_task(self._async_update_main_climate())
 
         for entity in tracked_entities:
             self.async_on_remove(
@@ -351,10 +368,11 @@ class MultizoneHeaterClimate(ClimateEntity):
         # Set up periodic reconciliation to ensure valve states are correct
         # This catches any missed events or state inconsistencies
         async def async_reconcile(_now):
-            """Periodic reconciliation of valve states."""
+            """Periodic reconciliation of valve states and main climate."""
             if self._hvac_mode in (HVACMode.HEAT, HVACMode.COOL):
-                _LOGGER.debug("Running periodic valve reconciliation")
+                _LOGGER.debug("Running periodic reconciliation")
                 await self._async_control_valves()
+                await self._async_update_main_climate()
 
         self.async_on_remove(
             async_track_time_interval(
@@ -367,9 +385,21 @@ class MultizoneHeaterClimate(ClimateEntity):
         # Initial update
         await self.async_update()
 
-        # Trigger initial valve control if in active mode
+        # Trigger initial valve control and main climate update if in active mode
         if self._hvac_mode in (HVACMode.HEAT, HVACMode.COOL):
             await self._async_control_valves()
+            await self._async_update_main_climate()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Run when entity will be removed from hass."""
+        # Cancel any pending debounce timers to prevent resource leaks
+        if self._zone_target_change_valve_timer and not self._zone_target_change_valve_timer.done():
+            self._zone_target_change_valve_timer.cancel()
+            _LOGGER.debug("Cancelled pending valve debounce timer during cleanup")
+        
+        if self._zone_target_change_main_timer and not self._zone_target_change_main_timer.done():
+            self._zone_target_change_main_timer.cancel()
+            _LOGGER.debug("Cancelled pending main climate debounce timer during cleanup")
 
     @property
     def current_temperature(self) -> float | None:
@@ -560,19 +590,156 @@ class MultizoneHeaterClimate(ClimateEntity):
         else:
             self._hvac_action = HVACAction.IDLE
 
+    async def _async_update_main_climate(self) -> None:
+        """Update main climate target temperature based on zone needs.
+        
+        This method calculates and updates the main climate target temperature
+        separately from valve control, allowing for debounced updates when zone
+        targets change rapidly (e.g., slider adjustments).
+        """
+        if self._hvac_mode not in (HVACMode.HEAT, HVACMode.COOL):
+            return
+        
+        if not self._main_climate_entity:
+            return
+        
+        # Collect zone data for main climate calculation
+        zone_targets = []
+        per_zone_desired_main = []
+        zones_needing_action = []
+        
+        for zone in self._zones:
+            # Get temperature from zone climate or sensor
+            current_temp = self._get_zone_temperature(zone)
+            if current_temp is None:
+                continue
+            
+            valve_entity = zone.get(CONF_VALVE_SWITCH)
+            virtual_switch = zone.get(CONF_VIRTUAL_SWITCH)
+            
+            if not valve_entity:
+                continue
+            
+            # Get zone target temperature
+            zone_target = self._get_zone_target_temperature(zone)
+            zone_targets.append(zone_target)
+            
+            # Calculate compensation-based desired main temperature
+            deficit = zone_target - current_temp
+            
+            # Check if zone needs action
+            check_entity = virtual_switch if virtual_switch else valve_entity
+            target_offset = zone.get(CONF_TARGET_TEMP_OFFSET, DEFAULT_TARGET_TEMP_OFFSET)
+            target_offset_closing = zone.get(CONF_TARGET_TEMP_OFFSET_CLOSING, DEFAULT_TARGET_TEMP_OFFSET_CLOSING)
+            
+            check_state = self.hass.states.get(check_entity)
+            is_currently_open = check_state and check_state.state == STATE_ON
+            
+            if self._hvac_mode == HVACMode.HEAT:
+                zone_desired_main = zone_target + self._compensation_factor * deficit
+                
+                # Determine if zone needs heating
+                if is_currently_open:
+                    physical_close_threshold = zone_target + target_offset_closing - self._physical_close_anticipation
+                    needs_action = current_temp < physical_close_threshold
+                else:
+                    needs_action = current_temp < (zone_target - target_offset)
+            else:  # COOL mode
+                zone_desired_main = zone_target + self._compensation_factor * deficit
+                
+                # Determine if zone needs cooling
+                if is_currently_open:
+                    needs_action = current_temp > (zone_target - target_offset_closing)
+                else:
+                    needs_action = current_temp > (zone_target + target_offset)
+            
+            if needs_action:
+                zones_needing_action.append(valve_entity)
+                per_zone_desired_main.append(zone_desired_main)
+        
+        # Calculate desired main climate target
+        desired_main = None
+        if zones_needing_action and per_zone_desired_main:
+            # Zones need action - use compensation-based target
+            if self._hvac_mode == HVACMode.HEAT:
+                desired_main = max(per_zone_desired_main)
+            else:  # COOL
+                desired_main = min(per_zone_desired_main)
+            
+            _LOGGER.debug(
+                "Main climate update: %d zones need action, desired=%.1f°C (mode=%s)",
+                len(zones_needing_action),
+                desired_main,
+                self._hvac_mode,
+            )
+        elif zone_targets:
+            # All zones satisfied - use slider-based interpolation
+            min_target = min(zone_targets)
+            max_target = max(zone_targets)
+            avg_target = sum(zone_targets) / len(zone_targets)
+            
+            weight = self._all_satisfied_mode
+            if weight <= 50:
+                ratio = weight / 50.0
+                desired_main = min_target + (avg_target - min_target) * ratio
+            else:
+                ratio = (weight - 50) / 50.0
+                desired_main = avg_target + (max_target - avg_target) * ratio
+            
+            _LOGGER.debug(
+                "Main climate update: All zones satisfied, desired=%.1f°C (slider=%d%%)",
+                desired_main,
+                weight,
+            )
+        
+        # Update main climate target if needed
+        if desired_main is not None:
+            # Round to 0.1°C and clamp to configured range
+            desired_main = round(desired_main, 1)
+            desired_main = max(self._main_min_temp, min(self._main_max_temp, desired_main))
+            
+            # Only update if change exceeds threshold
+            if self._last_main_target is None or abs(desired_main - self._last_main_target) >= self._main_change_threshold:
+                _LOGGER.debug(
+                    "Updating main climate from %.1f°C to %.1f°C (change %.1f°C)",
+                    self._last_main_target if self._last_main_target is not None else 0.0,
+                    desired_main,
+                    abs(desired_main - (self._last_main_target or 0.0)),
+                )
+                
+                try:
+                    await self.hass.services.async_call(
+                        "climate",
+                        "set_temperature",
+                        {
+                            "entity_id": self._main_climate_entity,
+                            ATTR_TEMPERATURE: desired_main,
+                        },
+                        blocking=False,
+                    )
+                    self._last_main_target = desired_main
+                except Exception as err:
+                    _LOGGER.error(
+                        "Failed to set main climate temperature to %.1f°C: %s",
+                        desired_main,
+                        err,
+                    )
+
     async def _async_control_valves(self) -> None:
-        """Control valve states based on zone temperatures with compensation logic."""
+        """Control valve states based on zone temperatures.
+        
+        This method focuses solely on valve control for immediate response to
+        temperature changes. Main climate target updates are handled separately
+        in _async_update_main_climate() which can be debounced.
+        """
         async with self._update_lock:
             if self._hvac_mode not in (HVACMode.HEAT, HVACMode.COOL):
                 return
 
             current_time = time.time()
             
-            # Collect zone data for analysis
-            zone_data = []
+            # Collect zone data and determine which valves should be open
             zones_needing_action = []
-            zone_targets = []
-            per_zone_desired_main = []
             
             for zone in self._zones:
                 # Get temperature from zone climate or sensor
@@ -593,20 +760,13 @@ class MultizoneHeaterClimate(ClimateEntity):
 
                 # Get zone target temperature from zone climate entity if available
                 zone_target = self._get_zone_target_temperature(zone)
-                zone_targets.append(zone_target)
 
                 # Get current valve state (or virtual switch state)
                 check_state = self.hass.states.get(check_entity)
                 is_currently_open = check_state and check_state.state == STATE_ON
 
-                # Calculate compensation-based desired main temperature
-                deficit = zone_target - current_temp
-                
+                # Determine if valve should be open with hysteresis
                 if self._hvac_mode == HVACMode.HEAT:
-                    # For heating: per_zone_desired_main = zone_target + compensation_factor * (zone_target - zone_current)
-                    zone_desired_main = zone_target + self._compensation_factor * deficit
-                    
-                    # Determine if valve should be open with hysteresis
                     if is_currently_open:
                         # Use closing offset for already-open valves
                         # Apply physical close anticipation for early closing
@@ -640,10 +800,6 @@ class MultizoneHeaterClimate(ClimateEntity):
                                 # Suppression expired
                                 del self._valve_no_reopen_until[valve_entity]
                 else:  # COOL mode
-                    # For cooling: per_zone_desired_main = zone_target - compensation_factor * (zone_current - zone_target)
-                    # Simplified: zone_target + compensation_factor * deficit (deficit is negative for cooling)
-                    zone_desired_main = zone_target + self._compensation_factor * deficit
-                    
                     # For cooling, inverse logic
                     if is_currently_open:
                         should_open = current_temp > (zone_target - target_offset_closing)
@@ -651,102 +807,15 @@ class MultizoneHeaterClimate(ClimateEntity):
                         should_open = current_temp > (zone_target + target_offset)
                 
                 _LOGGER.debug(
-                    "Zone %s: temp=%.1f°C, target=%.1f°C, deficit=%.1f°C, desired_main=%.1f°C, should_open=%s",
+                    "Zone %s: temp=%.1f°C, target=%.1f°C, should_open=%s",
                     zone.get(CONF_ZONE_NAME, valve_entity),
                     current_temp,
                     zone_target,
-                    deficit,
-                    zone_desired_main,
                     should_open,
                 )
                 
-                zone_data.append({
-                    'valve': valve_entity,
-                    'zone_name': zone.get(CONF_ZONE_NAME, valve_entity),
-                    'current_temp': current_temp,
-                    'zone_target': zone_target,
-                    'should_open': should_open,
-                    'zone_desired_main': zone_desired_main,
-                })
-                
                 if should_open:
                     zones_needing_action.append(valve_entity)
-                    per_zone_desired_main.append(zone_desired_main)
-
-            # Calculate desired main climate target
-            desired_main = None
-            if zones_needing_action and per_zone_desired_main:
-                # Zones need action - use compensation-based target
-                if self._hvac_mode == HVACMode.HEAT:
-                    # For heating: max of per-zone desired
-                    desired_main = max(per_zone_desired_main)
-                else:  # COOL
-                    # For cooling: min of per-zone desired
-                    desired_main = min(per_zone_desired_main)
-                
-                _LOGGER.debug(
-                    "Zones needing action: %d, desired_main=%.1f°C (mode=%s)",
-                    len(zones_needing_action),
-                    desired_main,
-                    self._hvac_mode,
-                )
-            elif zone_targets:
-                # All zones satisfied - use slider-based interpolation
-                min_target = min(zone_targets)
-                max_target = max(zone_targets)
-                avg_target = sum(zone_targets) / len(zone_targets)
-                
-                # Interpolate based on all_satisfied_mode (0=min, 50=avg, 100=max)
-                weight = self._all_satisfied_mode
-                if weight <= 50:
-                    ratio = weight / 50.0
-                    desired_main = min_target + (avg_target - min_target) * ratio
-                else:
-                    ratio = (weight - 50) / 50.0
-                    desired_main = avg_target + (max_target - avg_target) * ratio
-                
-                _LOGGER.debug(
-                    "All zones satisfied: min=%.1f, avg=%.1f, max=%.1f, slider=%d%%, desired_main=%.1f°C",
-                    min_target,
-                    avg_target,
-                    max_target,
-                    weight,
-                    desired_main,
-                )
-
-            # Update main climate target if needed
-            if desired_main is not None and self._main_climate_entity:
-                # Round to 0.1°C and clamp to configured range
-                desired_main = round(desired_main, 1)
-                desired_main = max(self._main_min_temp, min(self._main_max_temp, desired_main))
-                
-                # Only update if change exceeds threshold
-                if self._last_main_target is None or abs(desired_main - self._last_main_target) >= self._main_change_threshold:
-                    _LOGGER.debug(
-                        "Updating main climate from %.1f°C to %.1f°C (change %.1f°C >= threshold %.1f°C)",
-                        self._last_main_target if self._last_main_target is not None else 0.0,
-                        desired_main,
-                        abs(desired_main - (self._last_main_target or 0.0)),
-                        self._main_change_threshold,
-                    )
-                    
-                    try:
-                        await self.hass.services.async_call(
-                            "climate",
-                            "set_temperature",
-                            {
-                                "entity_id": self._main_climate_entity,
-                                ATTR_TEMPERATURE: desired_main,
-                            },
-                            blocking=False,
-                        )
-                        self._last_main_target = desired_main
-                    except Exception as err:
-                        _LOGGER.error(
-                            "Failed to set main climate temperature to %.1f°C: %s",
-                            desired_main,
-                            err,
-                        )
 
             # Get current valve states
             current_valve_states = await self._async_get_valve_states()
