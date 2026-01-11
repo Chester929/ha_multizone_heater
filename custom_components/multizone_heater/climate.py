@@ -179,6 +179,8 @@ class MultizoneHeaterClimate(ClimateEntity):
         # Track pending timers for debouncing (separate for valve and main climate)
         self._zone_target_change_valve_timer = None
         self._zone_target_change_main_timer = None
+        # Track pending delayed valve closing task
+        self._delayed_valve_close_task = None
 
         # Use Home Assistant's configured temperature unit
         self._attr_temperature_unit = hass.config.units.temperature_unit
@@ -388,6 +390,14 @@ class MultizoneHeaterClimate(ClimateEntity):
                 _LOGGER.debug("Cancelled pending main climate debounce timer during cleanup")
             except Exception as err:
                 _LOGGER.warning("Error cancelling main climate debounce timer: %s", err)
+        
+        # Cancel pending delayed valve closing task
+        if self._delayed_valve_close_task and not self._delayed_valve_close_task.done():
+            try:
+                self._delayed_valve_close_task.cancel()
+                _LOGGER.debug("Cancelled pending delayed valve close task during cleanup")
+            except Exception as err:
+                _LOGGER.warning("Error cancelling delayed valve close task: %s", err)
 
     @property
     def current_temperature(self) -> float | None:
@@ -427,7 +437,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                         "entity_id": self._main_climate_entity,
                         ATTR_TEMPERATURE: temperature,
                     },
-                    blocking=True,
+                    blocking=False,
                 )
             except Exception as err:
                 _LOGGER.error(
@@ -935,8 +945,18 @@ class MultizoneHeaterClimate(ClimateEntity):
                     valves_to_turn_on.add(valve)
                     valves_to_turn_off.discard(valve)
 
-            # Two-phase valve operation: open first, wait, then close
-            # Phase 1: Turn on valves that are currently off
+            # Two-phase valve operation: open first, schedule delayed close
+            # This prevents blocking for 60 seconds while maintaining safety
+            
+            # Cancel any pending delayed close task
+            if self._delayed_valve_close_task and not self._delayed_valve_close_task.done():
+                try:
+                    self._delayed_valve_close_task.cancel()
+                    _LOGGER.debug("Cancelled previous delayed valve close task")
+                except Exception:
+                    pass
+            
+            # Phase 1: Turn on valves that are currently off (immediate, non-blocking)
             valves_actually_turning_on = [v for v in valves_to_turn_on if not current_valve_states.get(v)]
             if valves_actually_turning_on:
                 tasks = []
@@ -953,30 +973,33 @@ class MultizoneHeaterClimate(ClimateEntity):
                 
                 _LOGGER.debug("Phase 1: Turning ON %d valves: %s", len(valves_actually_turning_on), valves_actually_turning_on)
                 await asyncio.gather(*tasks, return_exceptions=True)
-                
-                # Wait for valve transition if we're also closing valves
-                valves_actually_turning_off = [v for v in valves_to_turn_off if current_valve_states.get(v)]
-                if valves_actually_turning_off:
-                    _LOGGER.debug("Waiting %ds for valve transition before closing", self._valve_transition_delay)
-                    await asyncio.sleep(self._valve_transition_delay)
 
-            # Phase 2: Turn off valves that are currently on
+            # Phase 2: Schedule delayed closing for valves that need to turn off
             valves_actually_turning_off = [v for v in valves_to_turn_off if current_valve_states.get(v)]
             if valves_actually_turning_off:
-                tasks = []
-                for valve_entity in valves_actually_turning_off:
-                    domain = valve_entity.split('.')[0] if '.' in valve_entity else 'switch'
-                    tasks.append(
-                        self._async_call_service_with_error_handling(
-                            domain,
-                            SERVICE_TURN_OFF,
-                            {"entity_id": valve_entity},
-                            f"turn off valve {valve_entity}",
-                        )
+                # Schedule the delayed close task (non-blocking)
+                if valves_actually_turning_on:
+                    # If we opened valves, delay the close for safety
+                    self._delayed_valve_close_task = self.hass.async_create_task(
+                        self._async_delayed_valve_close(valves_actually_turning_off)
                     )
-                
-                _LOGGER.debug("Phase 2: Turning OFF %d valves: %s", len(valves_actually_turning_off), valves_actually_turning_off)
-                await asyncio.gather(*tasks, return_exceptions=True)
+                else:
+                    # No valves opened, close immediately
+                    tasks = []
+                    for valve_entity in valves_actually_turning_off:
+                        domain = valve_entity.split('.')[0] if '.' in valve_entity else 'switch'
+                        tasks.append(
+                            self._async_call_service_with_error_handling(
+                                domain,
+                                SERVICE_TURN_OFF,
+                                {"entity_id": valve_entity},
+                                f"turn off valve {valve_entity}",
+                            )
+                        )
+                    
+                    _LOGGER.debug("Phase 2: Turning OFF %d valves immediately (no valves opened): %s", 
+                                 len(valves_actually_turning_off), valves_actually_turning_off)
+                    await asyncio.gather(*tasks, return_exceptions=True)
 
     def _get_zone_temperature(self, zone: dict[str, Any]) -> float | None:
         """Get current temperature from zone climate entity or sensor.
@@ -1071,6 +1094,40 @@ class MultizoneHeaterClimate(ClimateEntity):
             )
         except Exception as err:
             _LOGGER.error("Failed to %s: %s", operation, err)
+
+    async def _async_delayed_valve_close(self, valves_to_close: list[str]) -> None:
+        """Close valves after transition delay (non-blocking).
+        
+        Args:
+            valves_to_close: List of valve entity IDs to close after delay
+        """
+        try:
+            _LOGGER.debug("Waiting %ds for valve transition before closing %d valves", 
+                         self._valve_transition_delay, len(valves_to_close))
+            await asyncio.sleep(self._valve_transition_delay)
+            
+            # Close the valves
+            tasks = []
+            for valve_entity in valves_to_close:
+                domain = valve_entity.split('.')[0] if '.' in valve_entity else 'switch'
+                tasks.append(
+                    self._async_call_service_with_error_handling(
+                        domain,
+                        SERVICE_TURN_OFF,
+                        {"entity_id": valve_entity},
+                        f"turn off valve {valve_entity}",
+                    )
+                )
+            
+            _LOGGER.debug("Phase 2 (delayed): Turning OFF %d valves: %s", len(valves_to_close), valves_to_close)
+            await asyncio.gather(*tasks, return_exceptions=True)
+        except asyncio.CancelledError:
+            _LOGGER.debug("Delayed valve close task cancelled")
+            raise
+        except Exception as err:
+            _LOGGER.error("Error in delayed valve close: %s", err, exc_info=True)
+        finally:
+            self._delayed_valve_close_task = None
 
     async def _async_turn_off_all_valves(self) -> None:
         """Turn off all valves except minimum required."""
