@@ -101,7 +101,7 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_MIN_VALVES_OPEN, default=DEFAULT_MIN_VALVES_OPEN
                 ): NumberSelector(
                     NumberSelectorConfig(
-                        min=0, max=10, mode=NumberSelectorMode.BOX
+                        min=0, max=10, step=1, mode=NumberSelectorMode.BOX
                     )
                 ),
             }
@@ -355,7 +355,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     ),
                 ): NumberSelector(
                     NumberSelectorConfig(
-                        min=0, max=10, mode=NumberSelectorMode.BOX
+                        min=0, max=10, step=1, mode=NumberSelectorMode.BOX
                     )
                 ),
             }
