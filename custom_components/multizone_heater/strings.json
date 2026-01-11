@@ -7,6 +7,7 @@
         "data": {
           "main_climate": "Main Climate Entity (optional)",
           "temperature_aggregation": "Temperature Aggregation Method",
+          "temperature_aggregation_weight": "Temperature Aggregation Weight (0%=min, 50%=avg, 100%=max)",
           "min_valves_open": "Minimum Valves Open"
         }
       },
@@ -17,7 +18,8 @@
           "zone_name": "Zone Name",
           "temperature_sensor": "Temperature Sensor",
           "valve_switch": "Valve Switch",
-          "target_temp_offset": "Target Temperature Offset (°C)",
+          "target_temp_offset": "Opening Offset Below Target (°C)",
+          "target_temp_offset_closing": "Closing Offset Above Target (°C)",
           "add_another": "Add Another Zone"
         }
       }
@@ -33,6 +35,7 @@
         "description": "Configure options for the multizone heater.",
         "data": {
           "temperature_aggregation": "Temperature Aggregation Method",
+          "temperature_aggregation_weight": "Temperature Aggregation Weight (0%=min, 50%=avg, 100%=max)",
           "min_valves_open": "Minimum Valves Open"
         }
       }

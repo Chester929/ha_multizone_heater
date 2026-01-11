@@ -29,7 +29,9 @@ from .const import (
     CONF_MAIN_CLIMATE,
     CONF_MIN_VALVES_OPEN,
     CONF_TARGET_TEMP_OFFSET,
+    CONF_TARGET_TEMP_OFFSET_CLOSING,
     CONF_TEMPERATURE_AGGREGATION,
+    CONF_TEMPERATURE_AGGREGATION_WEIGHT,
     CONF_TEMPERATURE_SENSOR,
     CONF_VALVE_SWITCH,
     CONF_ZONE_NAME,
@@ -37,7 +39,9 @@ from .const import (
     DEFAULT_HVAC_ACTION_DEADBAND,
     DEFAULT_MIN_VALVES_OPEN,
     DEFAULT_TARGET_TEMP_OFFSET,
+    DEFAULT_TARGET_TEMP_OFFSET_CLOSING,
     DEFAULT_TEMPERATURE_AGGREGATION,
+    DEFAULT_TEMPERATURE_AGGREGATION_WEIGHT,
     DOMAIN,
     TEMP_AGG_AVERAGE,
     TEMP_AGG_MAX,
@@ -60,6 +64,9 @@ async def async_setup_entry(
     temperature_aggregation = config.get(
         CONF_TEMPERATURE_AGGREGATION, DEFAULT_TEMPERATURE_AGGREGATION
     )
+    temperature_aggregation_weight = config.get(
+        CONF_TEMPERATURE_AGGREGATION_WEIGHT, DEFAULT_TEMPERATURE_AGGREGATION_WEIGHT
+    )
     min_valves_open = config.get(CONF_MIN_VALVES_OPEN, DEFAULT_MIN_VALVES_OPEN)
 
     entities = [
@@ -69,6 +76,7 @@ async def async_setup_entry(
             zones,
             main_climate,
             temperature_aggregation,
+            temperature_aggregation_weight,
             min_valves_open,
         )
     ]
@@ -97,6 +105,7 @@ class MultizoneHeaterClimate(ClimateEntity):
         zones: list[dict[str, Any]],
         main_climate: str | None,
         temperature_aggregation: str,
+        temperature_aggregation_weight: int,
         min_valves_open: int,
     ) -> None:
         """Initialize the multizone heater."""
@@ -105,6 +114,7 @@ class MultizoneHeaterClimate(ClimateEntity):
         self._zones = zones
         self._main_climate_entity = main_climate
         self._temperature_aggregation = temperature_aggregation
+        self._temperature_aggregation_weight = temperature_aggregation_weight
         self._min_valves_open = min_valves_open
 
         # Use Home Assistant's configured temperature unit
@@ -286,6 +296,22 @@ class MultizoneHeaterClimate(ClimateEntity):
                 self._current_temperature = min(temperatures)
             elif self._temperature_aggregation == TEMP_AGG_MAX:
                 self._current_temperature = max(temperatures)
+            else:
+                # Use weight-based aggregation (0% = min, 50% = avg, 100% = max)
+                min_temp = min(temperatures)
+                max_temp = max(temperatures)
+                avg_temp = sum(temperatures) / len(temperatures)
+                
+                # Interpolate between min and avg (0-50%) or avg and max (50-100%)
+                weight = self._temperature_aggregation_weight
+                if weight <= 50:
+                    # Interpolate between min and avg
+                    ratio = weight / 50.0
+                    self._current_temperature = min_temp + (avg_temp - min_temp) * ratio
+                else:
+                    # Interpolate between avg and max
+                    ratio = (weight - 50) / 50.0
+                    self._current_temperature = avg_temp + (max_temp - avg_temp) * ratio
         else:
             self._current_temperature = None
 
@@ -320,6 +346,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                 sensor_entity = zone[CONF_TEMPERATURE_SENSOR]
                 valve_entity = zone[CONF_VALVE_SWITCH]
                 target_offset = zone.get(CONF_TARGET_TEMP_OFFSET, DEFAULT_TARGET_TEMP_OFFSET)
+                target_offset_closing = zone.get(CONF_TARGET_TEMP_OFFSET_CLOSING, DEFAULT_TARGET_TEMP_OFFSET_CLOSING)
 
                 state = self.hass.states.get(sensor_entity)
                 
@@ -328,8 +355,19 @@ class MultizoneHeaterClimate(ClimateEntity):
                         current_temp = float(state.state)
                         zone_target = self._target_temperature
 
-                        # Determine if valve should be open
-                        should_open = current_temp < (zone_target - target_offset)
+                        # Get current valve state
+                        valve_state = self.hass.states.get(valve_entity)
+                        is_currently_open = valve_state and valve_state.state == STATE_ON
+
+                        # Determine if valve should be open with hysteresis
+                        # If valve is currently closed, open when below (target - offset)
+                        # If valve is currently open, close when above (target + offset_closing)
+                        if is_currently_open:
+                            # Use closing offset for already-open valves
+                            should_open = current_temp < (zone_target + target_offset_closing)
+                        else:
+                            # Use opening offset for closed valves
+                            should_open = current_temp < (zone_target - target_offset)
                         
                         if should_open:
                             zones_needing_heat.append(valve_entity)

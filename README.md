@@ -44,13 +44,15 @@ This integration provides an efficient, asynchronous Python-based solution for m
    - **Step 1**: Configure main settings
      - **Main Climate Entity** (optional): Select your main climate/thermostat entity
      - **Temperature Aggregation**: Choose how to calculate overall temperature (average, minimum, or maximum)
+     - **Temperature Aggregation Weight**: Fine-tune temperature calculation using a percentage slider (0% = minimum, 50% = average, 100% = maximum)
      - **Minimum Valves Open**: Number of valves to keep open at all times (default: 1)
    
    - **Step 2**: Add zones
      - **Zone Name**: Name for the zone (e.g., "Living Room", "Bedroom")
      - **Temperature Sensor**: Select the temperature sensor for this zone
      - **Valve Switch**: Select the switch entity controlling this zone's valve
-     - **Target Temperature Offset**: Temperature offset below target to trigger valve opening (default: 0.5°C)
+     - **Opening Offset Below Target**: Temperature offset below target to trigger valve opening (default: 0.5°C)
+     - **Closing Offset Above Target**: Temperature offset above target to trigger valve closing (default: 0.0°C, creates hysteresis)
      - **Add Another Zone**: Check to add more zones, uncheck to finish
 
 ## Usage
@@ -90,14 +92,24 @@ The integration monitors temperature sensors in all configured zones and aggrega
 - **Average**: Uses the mean temperature across all zones
 - **Minimum**: Uses the coldest zone's temperature (ensures all zones reach target)
 - **Maximum**: Uses the warmest zone's temperature
+- **Weight-based (0-100% slider)**: Allows fine-grained control between minimum and maximum
+  - 0% = Uses minimum temperature (coldest zone)
+  - 50% = Uses average temperature (mean of all zones)
+  - 100% = Uses maximum temperature (warmest zone)
+  - Values between interpolate smoothly (e.g., 25% is halfway between min and average)
 
-### Valve Control Logic
+### Valve Control Logic with Hysteresis
 
-For each zone, the integration:
+For each zone, the integration uses a hysteresis band to prevent rapid valve cycling:
 
-1. Compares the zone's current temperature to the target temperature
-2. Opens the valve if the zone is below (target - offset)
-3. Closes the valve if the zone is at or above the target
+1. **When valve is closed**: Opens when temperature drops below `(target - opening_offset)`
+2. **When valve is open**: Closes when temperature rises above `(target + closing_offset)`
+3. This creates a deadband that prevents the valve from rapidly switching on/off
+
+**Example with target = 21°C, opening_offset = 0.5°C, closing_offset = 0.2°C:**
+- Valve opens when temperature < 20.5°C
+- Valve closes when temperature > 21.2°C
+- Between 20.5°C and 21.2°C, valve maintains its current state
 4. Ensures the configured minimum number of valves remain open
 
 All valve operations are executed asynchronously in parallel for maximum efficiency.
