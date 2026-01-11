@@ -1,0 +1,58 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Multizone Heater",
+        "description": "Configure the main climate entity and aggregation settings.",
+        "data": {
+          "main_climate": "Main Climate Entity (optional)",
+          "temperature_aggregation": "Temperature Aggregation Method",
+          "temperature_aggregation_weight": "Temperature Aggregation Weight (0%=min, 50%=avg, 100%=max)",
+          "min_valves_open": "Minimum Valves Open"
+        }
+      },
+      "add_zone": {
+        "title": "Add Heating Zone",
+        "description": "Add a heating zone. Provide either a zone climate entity OR a temperature sensor (or both). If using valves, BOTH physical valve and virtual switch are required.",
+        "data": {
+          "zone_name": "Zone Name",
+          "zone_climate": "Zone Climate Entity (optional, provides temperature)",
+          "temperature_sensor": "Temperature Sensor Override (optional)",
+          "valve_switch": "Physical Valve Switch (required if using virtual switch)",
+          "virtual_switch": "Virtual Switch (required if using physical valve)",
+          "target_temp_offset": "Opening Offset Below Target (°C)",
+          "target_temp_offset_closing": "Closing Offset Above Target (°C)",
+          "add_another": "Add Another Zone"
+        }
+      },
+      "fallback_zones": {
+        "title": "Select Fallback Zones",
+        "description": "Select at least one zone to keep open when all zones are satisfied or during cooling mode. This ensures pump safety and system stability.",
+        "data": {
+          "fallback_zones": "Fallback Zones (at least one required)"
+        }
+      }
+    },
+    "error": {
+      "no_zones": "At least one zone must be configured.",
+      "need_temp_source": "Provide at least one temperature source (zone climate or temperature sensor).",
+      "need_virtual_switch": "Physical valve requires a virtual switch (virtual switch pattern).",
+      "need_physical_valve": "Virtual switch requires a physical valve (virtual switch pattern).",
+      "duplicate_entity": "This entity is already used in another zone.",
+      "need_fallback": "At least one fallback zone must be selected for pump safety."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Multizone Heater Options",
+        "description": "Configure options for the multizone heater.",
+        "data": {
+          "temperature_aggregation": "Temperature Aggregation Method",
+          "temperature_aggregation_weight": "Temperature Aggregation Weight (0%=min, 50%=avg, 100%=max)",
+          "min_valves_open": "Minimum Valves Open"
+        }
+      }
+    }
+  }
+}
