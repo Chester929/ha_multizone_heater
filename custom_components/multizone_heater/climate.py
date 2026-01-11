@@ -305,11 +305,17 @@ class MultizoneHeaterClimate(ClimateEntity):
                 
                 # Cancel existing valve timer if present
                 if self._zone_target_change_valve_timer and not self._zone_target_change_valve_timer.done():
-                    self._zone_target_change_valve_timer.cancel()
+                    try:
+                        self._zone_target_change_valve_timer.cancel()
+                    except Exception:
+                        pass  # Timer might have just completed
                 
                 # Cancel existing main climate timer if present
                 if self._zone_target_change_main_timer and not self._zone_target_change_main_timer.done():
-                    self._zone_target_change_main_timer.cancel()
+                    try:
+                        self._zone_target_change_main_timer.cancel()
+                    except Exception:
+                        pass  # Timer might have just completed
                 
                 # Create both debounced tasks - they run in parallel
                 self._zone_target_change_valve_timer = self.hass.async_create_task(
@@ -374,12 +380,18 @@ class MultizoneHeaterClimate(ClimateEntity):
         """Run when entity will be removed from hass."""
         # Cancel any pending debounce timers to prevent resource leaks
         if self._zone_target_change_valve_timer and not self._zone_target_change_valve_timer.done():
-            self._zone_target_change_valve_timer.cancel()
-            _LOGGER.debug("Cancelled pending valve debounce timer during cleanup")
+            try:
+                self._zone_target_change_valve_timer.cancel()
+                _LOGGER.debug("Cancelled pending valve debounce timer during cleanup")
+            except Exception as err:
+                _LOGGER.warning("Error cancelling valve debounce timer: %s", err)
         
         if self._zone_target_change_main_timer and not self._zone_target_change_main_timer.done():
-            self._zone_target_change_main_timer.cancel()
-            _LOGGER.debug("Cancelled pending main climate debounce timer during cleanup")
+            try:
+                self._zone_target_change_main_timer.cancel()
+                _LOGGER.debug("Cancelled pending main climate debounce timer during cleanup")
+            except Exception as err:
+                _LOGGER.warning("Error cancelling main climate debounce timer: %s", err)
 
     @property
     def current_temperature(self) -> float | None:
@@ -578,6 +590,9 @@ class MultizoneHeaterClimate(ClimateEntity):
             await self._async_control_valves()
         except asyncio.CancelledError:
             _LOGGER.debug("Valve debounce timer cancelled - newer target change received")
+            raise  # Re-raise to ensure proper cancellation
+        except Exception as err:
+            _LOGGER.error("Error in delayed valve control: %s", err, exc_info=True)
         finally:
             self._zone_target_change_valve_timer = None
 
@@ -589,6 +604,9 @@ class MultizoneHeaterClimate(ClimateEntity):
             await self._async_update_main_climate()
         except asyncio.CancelledError:
             _LOGGER.debug("Main climate debounce timer cancelled - newer target change received")
+            raise  # Re-raise to ensure proper cancellation
+        except Exception as err:
+            _LOGGER.error("Error in delayed main climate update: %s", err, exc_info=True)
         finally:
             self._zone_target_change_main_timer = None
 
@@ -598,6 +616,9 @@ class MultizoneHeaterClimate(ClimateEntity):
         This method calculates and updates the main climate target temperature
         separately from valve control, allowing for debounced updates when zone
         targets change rapidly (e.g., slider adjustments).
+        
+        Note: This method does NOT use _update_lock to allow parallel execution
+        with valve control. It only reads zone states, which is safe for concurrent access.
         """
         if self._hvac_mode not in (HVACMode.HEAT, HVACMode.COOL):
             return
@@ -606,6 +627,7 @@ class MultizoneHeaterClimate(ClimateEntity):
             return
         
         # Collect zone data for main climate calculation
+        # Reading zone states is safe without lock as we only read, don't modify
         zone_targets = []
         per_zone_desired_main = []
         zones_needing_action = []
