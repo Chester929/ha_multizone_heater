@@ -789,8 +789,6 @@ class MultizoneHeaterClimate(ClimateEntity):
         Returns:
             Current temperature or None if unavailable
         """
-        current_temp = None
-        
         # Try zone climate entity first
         if zone.get(CONF_ZONE_CLIMATE):
             climate_state = self.hass.states.get(zone[CONF_ZONE_CLIMATE])
