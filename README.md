@@ -234,6 +234,23 @@ Compared to blueprint-based automation solutions, this integration offers:
 - Verify sensor entities are in the correct domain (sensor)
 - Check for STATE_UNKNOWN or STATE_UNAVAILABLE in sensor states
 
+### TypeError: 'float' object cannot be interpreted as an integer
+
+This error was fixed in version 0.0.2. If you encounter this issue:
+
+1. **Update to the latest version** - The fix ensures `min_valves_open` is always stored as an integer
+2. **Reconfigure the integration** - Go to Settings → Devices & Services → Multizone Heater → Configure and save the settings again
+3. **Enable debug logging** to verify the fix:
+   ```yaml
+   logger:
+     default: info
+     logs:
+       custom_components.multizone_heater: debug
+   ```
+4. Check the logs for a message like: `Initialized min_valves_open: 2 (type: int, original: 2.0)`
+
+The integration now automatically converts float values to integers and includes debug logging to help diagnose configuration issues.
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
