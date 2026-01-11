@@ -578,7 +578,20 @@ class MultizoneHeaterClimate(ClimateEntity):
                 target_offset = zone.get(CONF_TARGET_TEMP_OFFSET, DEFAULT_TARGET_TEMP_OFFSET)
                 target_offset_closing = zone.get(CONF_TARGET_TEMP_OFFSET_CLOSING, DEFAULT_TARGET_TEMP_OFFSET_CLOSING)
 
-                zone_target = self._target_temperature
+                # Get zone target temperature from zone climate entity if available
+                zone_target = self._target_temperature  # Default fallback
+                if zone.get(CONF_ZONE_CLIMATE):
+                    climate_state = self.hass.states.get(zone[CONF_ZONE_CLIMATE])
+                    if climate_state and climate_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                        target_attr = climate_state.attributes.get("temperature")
+                        if target_attr is not None:
+                            try:
+                                zone_target = float(target_attr)
+                            except (ValueError, TypeError):
+                                _LOGGER.warning(
+                                    "Unable to parse target temperature from climate %s, using default",
+                                    zone[CONF_ZONE_CLIMATE],
+                                )
                 zone_targets.append(zone_target)
 
                 # Get current valve state (or virtual switch state)
