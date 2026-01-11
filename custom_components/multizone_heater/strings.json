@@ -24,6 +24,13 @@
           "target_temp_offset_closing": "Closing Offset Above Target (°C)",
           "add_another": "Add Another Zone"
         }
+      },
+      "fallback_zones": {
+        "title": "Select Fallback Zones",
+        "description": "Select at least one zone to keep open when all zones are satisfied or during cooling mode. This ensures pump safety and system stability.",
+        "data": {
+          "fallback_zones": "Fallback Zones (at least one required)"
+        }
       }
     },
     "error": {
@@ -31,7 +38,8 @@
       "need_temp_source": "Provide at least one temperature source (zone climate or temperature sensor).",
       "need_virtual_switch": "Physical valve requires a virtual switch (virtual switch pattern).",
       "need_physical_valve": "Virtual switch requires a physical valve (virtual switch pattern).",
-      "duplicate_entity": "This entity is already used in another zone."
+      "duplicate_entity": "This entity is already used in another zone.",
+      "need_fallback": "At least one fallback zone must be selected for pump safety."
     }
   },
   "options": {

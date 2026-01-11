@@ -15,6 +15,7 @@ CONF_MAIN_CLIMATE = "main_climate"
 CONF_TEMPERATURE_AGGREGATION = "temperature_aggregation"
 CONF_TEMPERATURE_AGGREGATION_WEIGHT = "temperature_aggregation_weight"
 CONF_MIN_VALVES_OPEN = "min_valves_open"
+CONF_FALLBACK_ZONES = "fallback_zones"
 
 # Defaults
 DEFAULT_TARGET_TEMP_OFFSET = 0.5

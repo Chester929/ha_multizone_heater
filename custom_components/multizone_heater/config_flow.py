@@ -18,6 +18,7 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    CONF_FALLBACK_ZONES,
     CONF_MAIN_CLIMATE,
     CONF_MIN_VALVES_OPEN,
     CONF_TARGET_TEMP_OFFSET,
@@ -54,6 +55,7 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._temperature_aggregation = DEFAULT_TEMPERATURE_AGGREGATION
         self._temperature_aggregation_weight = DEFAULT_TEMPERATURE_AGGREGATION_WEIGHT
         self._min_valves_open = DEFAULT_MIN_VALVES_OPEN
+        self._fallback_zones = []
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -203,6 +205,30 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             errors=errors,
                         )
 
+                    # Move to fallback zone selection
+                    return await self.async_step_fallback_zones()
+
+        return self.async_show_form(
+            step_id="add_zone",
+            data_schema=self._get_zone_schema(),
+            errors=errors,
+        )
+
+    async def async_step_fallback_zones(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle selecting fallback zones."""
+        errors = {}
+
+        if user_input is not None:
+            fallback_zones = user_input.get(CONF_FALLBACK_ZONES, [])
+            
+            # Validate at least one fallback zone is selected
+            if not fallback_zones:
+                errors[CONF_FALLBACK_ZONES] = "need_fallback"
+            else:
+                self._fallback_zones = fallback_zones
+                
                 # Create the config entry
                 return self.async_create_entry(
                     title=f"Multizone Heater ({len(self._zones)} zones)",
@@ -211,14 +237,33 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_TEMPERATURE_AGGREGATION: self._temperature_aggregation,
                         CONF_TEMPERATURE_AGGREGATION_WEIGHT: self._temperature_aggregation_weight,
                         CONF_MIN_VALVES_OPEN: self._min_valves_open,
+                        CONF_FALLBACK_ZONES: self._fallback_zones,
                         CONF_ZONES: self._zones,
                     },
                 )
 
+        # Build list of zone names for selection
+        zone_options = [zone[CONF_ZONE_NAME] for zone in self._zones]
+
+        data_schema = vol.Schema(
+            {
+                vol.Required(CONF_FALLBACK_ZONES): SelectSelector(
+                    SelectSelectorConfig(
+                        options=zone_options,
+                        multiple=True,
+                        mode=SelectSelectorMode.LIST,
+                    )
+                ),
+            }
+        )
+
         return self.async_show_form(
-            step_id="add_zone",
-            data_schema=self._get_zone_schema(),
+            step_id="fallback_zones",
+            data_schema=data_schema,
             errors=errors,
+            description_placeholders={
+                "info": "Select at least one zone to keep open when all zones are satisfied or during cooling mode. This ensures pump safety."
+            },
         )
 
     def _get_zone_schema(self):
