@@ -355,8 +355,12 @@ class MultizoneHeaterClimate(ClimateEntity):
             """Periodic reconciliation of valve states and main climate."""
             if self._hvac_mode in (HVACMode.HEAT, HVACMode.COOL):
                 _LOGGER.debug("Running periodic reconciliation")
-                await self._async_control_valves()
-                await self._async_update_main_climate()
+                # Run valve control and main climate update in parallel for better performance
+                await asyncio.gather(
+                    self._async_control_valves(),
+                    self._async_update_main_climate(),
+                    return_exceptions=True
+                )
 
         self.async_on_remove(
             async_track_time_interval(
@@ -370,9 +374,13 @@ class MultizoneHeaterClimate(ClimateEntity):
         await self.async_update()
 
         # Trigger initial valve control and main climate update if in active mode
+        # Run in parallel for better startup performance
         if self._hvac_mode in (HVACMode.HEAT, HVACMode.COOL):
-            await self._async_control_valves()
-            await self._async_update_main_climate()
+            await asyncio.gather(
+                self._async_control_valves(),
+                self._async_update_main_climate(),
+                return_exceptions=True
+            )
 
     async def async_will_remove_from_hass(self) -> None:
         """Run when entity will be removed from hass."""
