@@ -295,15 +295,15 @@ class MultizoneHeaterClimate(ClimateEntity):
 
         self.async_on_remove(
             async_track_time_interval(
-                self.hass, 
-                async_reconcile, 
+                self.hass,
+                async_reconcile,
                 timedelta(seconds=DEFAULT_RECONCILIATION_INTERVAL)
             )
         )
 
         # Initial update
         await self.async_update()
-        
+
         # Trigger initial valve control if in active mode
         if self._hvac_mode in (HVACMode.HEAT, HVACMode.COOL):
             await self._async_control_valves()
