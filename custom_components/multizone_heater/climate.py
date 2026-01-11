@@ -198,14 +198,14 @@ class MultizoneHeaterClimate(ClimateEntity):
         self._hvac_mode = HVACMode.OFF
         self._hvac_action = HVACAction.OFF
         self._supports_cooling = False
-        
+
         # Determine supported HVAC modes based on main climate
         if main_climate:
             main_state = hass.states.get(main_climate)
             if main_state:
                 main_hvac_modes = main_state.attributes.get("hvac_modes", [])
                 self._supports_cooling = HVACMode.COOL in main_hvac_modes or "cool" in main_hvac_modes
-        
+
         # Set available HVAC modes
         if self._supports_cooling:
             self._attr_hvac_modes = [HVACMode.HEAT, HVACMode.COOL, HVACMode.OFF]
@@ -229,7 +229,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                                 "Valve will be closed during cooling mode for this zone.",
                                 zone.get(CONF_ZONE_NAME, zone.get(CONF_ZONE_CLIMATE))
                             )
-        
+
         # Track all temperature sources (zone climate entities and sensors)
         tracked_entities = []
         for zone in self._zones:
@@ -239,18 +239,18 @@ class MultizoneHeaterClimate(ClimateEntity):
                 tracked_entities.append(zone[CONF_TEMPERATURE_SENSOR])
             if zone.get(CONF_VIRTUAL_SWITCH):
                 tracked_entities.append(zone[CONF_VIRTUAL_SWITCH])
-        
+
         # Track main temp sensor if configured
         if self._main_temp_sensor:
             tracked_entities.append(self._main_temp_sensor)
-        
+
         @callback
         def async_sensor_changed(event):
             """Handle temperature sensor changes.
-            
+
             For zone climate target temperature changes:
             - Debounces BOTH valve control AND main climate updates (run in parallel)
-            
+
             For other changes (current temperature, virtual switch):
             - Triggers valve control immediately
             - Triggers main climate update immediately
@@ -260,12 +260,12 @@ class MultizoneHeaterClimate(ClimateEntity):
             if event.data.get("new_state") and event.data.get("old_state"):
                 new_state = event.data["new_state"]
                 old_state = event.data["old_state"]
-                
+
                 # Check if the entity is a climate entity
                 if new_state.domain == "climate":
                     new_target = new_state.attributes.get("temperature")
                     old_target = old_state.attributes.get("temperature")
-                    
+
                     # Detect target temperature changes (not current temperature)
                     if new_target is not None and old_target is not None:
                         try:
@@ -279,27 +279,27 @@ class MultizoneHeaterClimate(ClimateEntity):
                                 )
                         except (ValueError, TypeError):
                             pass
-            
+
             self.async_schedule_update_ha_state(True)
-            
+
             if is_zone_target_change and self._hvac_mode in (HVACMode.HEAT, HVACMode.COOL):
                 # For zone target changes, debounce BOTH valve control and main climate update
                 # These run as separate parallel async tasks
-                
+
                 # Cancel existing valve timer if present
                 if self._zone_target_change_valve_timer and not self._zone_target_change_valve_timer.done():
                     try:
                         self._zone_target_change_valve_timer.cancel()
                     except Exception:
                         pass  # Timer might have just completed
-                
+
                 # Cancel existing main climate timer if present
                 if self._zone_target_change_main_timer and not self._zone_target_change_main_timer.done():
                     try:
                         self._zone_target_change_main_timer.cancel()
                     except Exception:
                         pass  # Timer might have just completed
-                
+
                 # Create both debounced tasks - they run in parallel
                 self._zone_target_change_valve_timer = self.hass.async_create_task(
                     self._async_delayed_valve_control()
@@ -307,7 +307,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                 self._zone_target_change_main_timer = self.hass.async_create_task(
                     self._async_delayed_main_climate_update()
                 )
-                
+
             elif self._hvac_mode in (HVACMode.HEAT, HVACMode.COOL):
                 # For non-target changes (temperature sensor updates, virtual switch, etc.)
                 # trigger both valve control and main climate update immediately (in parallel)
@@ -326,7 +326,7 @@ class MultizoneHeaterClimate(ClimateEntity):
             @callback
             def async_climate_changed(event):
                 """Handle main climate changes.
-                
+
                 When main climate HVAC mode changes to OFF, close all valves except fallback zones.
                 When main climate is in any other mode, manage valves normally.
                 """
@@ -335,12 +335,12 @@ class MultizoneHeaterClimate(ClimateEntity):
                 if new_state:
                     main_hvac_mode = new_state.state
                     _LOGGER.debug("Main climate HVAC mode changed to: %s", main_hvac_mode)
-                    
+
                     # If main climate is OFF, close all valves except fallback zones
                     if main_hvac_mode == HVACMode.OFF:
                         _LOGGER.info("Main climate is OFF - closing all valves except fallback zones")
                         self.hass.async_create_task(self._async_close_valves_except_fallback())
-                
+
                 self.async_schedule_update_ha_state(True)
 
             self.async_on_remove(
@@ -391,14 +391,14 @@ class MultizoneHeaterClimate(ClimateEntity):
                 _LOGGER.debug("Cancelled pending valve debounce timer during cleanup")
             except Exception as err:
                 _LOGGER.warning("Error cancelling valve debounce timer: %s", err)
-        
+
         if self._zone_target_change_main_timer and not self._zone_target_change_main_timer.done():
             try:
                 self._zone_target_change_main_timer.cancel()
                 _LOGGER.debug("Cancelled pending main climate debounce timer during cleanup")
             except Exception as err:
                 _LOGGER.warning("Error cancelling main climate debounce timer: %s", err)
-        
+
         # Cancel pending delayed valve closing task
         if self._delayed_valve_close_task and not self._delayed_valve_close_task.done():
             try:
@@ -459,7 +459,7 @@ class MultizoneHeaterClimate(ClimateEntity):
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target hvac mode for this integration.
-        
+
         Note: This sets the multizone heater's mode, NOT the main climate.
         The main climate HVAC mode is managed externally by the user.
         """
@@ -482,7 +482,7 @@ class MultizoneHeaterClimate(ClimateEntity):
         # Get current temperature from main climate entity or main temp sensor
         # (not from zones - main climate has its own sensor in corridor)
         self._current_temperature = None
-        
+
         # First try main temp sensor override if configured
         if self._main_temp_sensor:
             sensor_state = self.hass.states.get(self._main_temp_sensor)
@@ -494,7 +494,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                         "Unable to parse temperature from main sensor %s",
                         self._main_temp_sensor,
                     )
-        
+
         # Fall back to main climate entity's current temperature
         if self._current_temperature is None and self._main_climate_entity:
             climate_state = self.hass.states.get(self._main_climate_entity)
@@ -570,23 +570,23 @@ class MultizoneHeaterClimate(ClimateEntity):
 
     async def _async_update_main_climate(self) -> None:
         """Update main climate target temperature based on zone needs.
-        
+
         This method calculates and updates the main climate target temperature
         separately from valve control, allowing for debounced updates when zone
         targets change rapidly (e.g., slider adjustments).
-        
+
         Note: This method does NOT use _update_lock to allow parallel execution
         with valve control. It only reads zone states, which is safe for concurrent access.
         """
         if self._hvac_mode not in (HVACMode.HEAT, HVACMode.COOL):
             return
-        
+
         if not self._main_climate_entity:
             return
-        
+
         # Calculate desired main climate target using helper method
         desired_main, is_holding_mode = self._calculate_desired_main_target()
-        
+
         # Log the mode and target
         if desired_main is not None:
             if is_holding_mode:
@@ -600,7 +600,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                     "Main climate update: Heating mode (zones need action), desired=%.1f°C",
                     desired_main,
                 )
-        
+
         # Update main climate target if needed
         if desired_main is not None:
             # Only update if change exceeds threshold
@@ -612,7 +612,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                     desired_main,
                     abs(desired_main - last_target_display),
                 )
-                
+
                 try:
                     await self.hass.services.async_call(
                         "climate",
@@ -635,12 +635,12 @@ class MultizoneHeaterClimate(ClimateEntity):
         self, zone_target: float, target_offset: float, target_offset_closing: float
     ) -> tuple[float, float]:
         """Calculate satisfaction bounds for a zone based on HVAC mode.
-        
+
         Args:
             zone_target: Target temperature for the zone
             target_offset: Opening offset (threshold below target for heating, above for cooling)
             target_offset_closing: Closing offset (threshold above target for heating, below for cooling)
-            
+
         Returns:
             Tuple of (lower_bound, upper_bound) defining the satisfaction range
         """
@@ -652,19 +652,19 @@ class MultizoneHeaterClimate(ClimateEntity):
             # Cooling: satisfied range is [target - closing_offset, target + opening_offset]
             lower_bound = zone_target - target_offset_closing
             upper_bound = zone_target + target_offset
-        
+
         return lower_bound, upper_bound
 
     def _get_zone_status(
         self, current_temp: float, lower_bound: float, upper_bound: float
     ) -> str:
         """Determine zone satisfaction status based on temperature and bounds.
-        
+
         Args:
             current_temp: Current zone temperature
             lower_bound: Lower bound of satisfaction range
             upper_bound: Upper bound of satisfaction range
-            
+
         Returns:
             Status string: 'underheated', 'overheated', 'satisfied', or 'undercooled'
         """
@@ -685,7 +685,7 @@ class MultizoneHeaterClimate(ClimateEntity):
 
     def _calculate_desired_main_target(self) -> tuple[float | None, bool]:
         """Calculate desired main climate target without updating it.
-        
+
         Returns:
             Tuple of (desired_main_temp, is_holding_mode)
             - desired_main_temp: Calculated target temperature for main climate, or None
@@ -695,42 +695,42 @@ class MultizoneHeaterClimate(ClimateEntity):
         zone_targets = []
         per_zone_desired_main = []
         zones_needing_action = []
-        
+
         for zone in self._zones:
             current_temp = self._get_zone_temperature(zone)
             if current_temp is None:
                 continue
-            
+
             valve_entity = zone.get(CONF_VALVE_SWITCH)
             if not valve_entity:
                 continue
-            
+
             zone_target = self._get_zone_target_temperature(zone)
             zone_targets.append(zone_target)
-            
+
             target_offset = zone.get(CONF_TARGET_TEMP_OFFSET, DEFAULT_TARGET_TEMP_OFFSET)
             target_offset_closing = zone.get(CONF_TARGET_TEMP_OFFSET_CLOSING, DEFAULT_TARGET_TEMP_OFFSET_CLOSING)
-            
+
             # Calculate compensation-based desired main temperature
             deficit = zone_target - current_temp
             zone_desired_main = zone_target + self._compensation_factor * deficit
-            
+
             # Get satisfaction bounds
             lower_bound, upper_bound = self._get_zone_satisfaction_bounds(
                 zone_target, target_offset, target_offset_closing
             )
-            
+
             # Zone needs action if outside satisfaction range (underheated or overheated)
             needs_action = current_temp < lower_bound or current_temp > upper_bound
-            
+
             if needs_action:
                 zones_needing_action.append(valve_entity)
                 per_zone_desired_main.append(zone_desired_main)
-        
+
         # Calculate desired main climate target
         desired_main = None
         is_holding_mode = False
-        
+
         if zones_needing_action and per_zone_desired_main:
             # Heating mode: zones need action - use compensation-based target
             if self._hvac_mode == HVACMode.HEAT:
@@ -743,7 +743,7 @@ class MultizoneHeaterClimate(ClimateEntity):
             min_target = min(zone_targets)
             max_target = max(zone_targets)
             avg_target = sum(zone_targets) / len(zone_targets)
-            
+
             weight = self._all_satisfied_mode
             if weight <= 50:
                 ratio = weight / 50.0
@@ -752,17 +752,17 @@ class MultizoneHeaterClimate(ClimateEntity):
                 ratio = (weight - 50) / 50.0
                 desired_main = avg_target + (max_target - avg_target) * ratio
             is_holding_mode = True
-        
+
         if desired_main is not None:
             # Round and clamp to configured range
             desired_main = round(desired_main, 1)
             desired_main = max(self._main_min_temp, min(self._main_max_temp, desired_main))
-        
+
         return desired_main, is_holding_mode
 
     async def _async_control_valves(self) -> None:
         """Control valve states based on zone temperatures.
-        
+
         This method focuses solely on valve control for immediate response to
         temperature changes. Main climate target updates are handled separately
         in _async_update_main_climate() which can be debounced.
@@ -772,14 +772,14 @@ class MultizoneHeaterClimate(ClimateEntity):
                 return
 
             current_time = time.time()
-            
+
             # First, calculate what the main climate target would be
             # This is needed to determine valve state for satisfied zones
             desired_main_target, is_holding_mode = self._calculate_desired_main_target()
-            
+
             # Collect zone data and determine which valves should be open
             zones_needing_action = []
-            
+
             for zone in self._zones:
                 # Get temperature from zone climate or sensor
                 current_temp = self._get_zone_temperature(zone)
@@ -788,10 +788,10 @@ class MultizoneHeaterClimate(ClimateEntity):
 
                 valve_entity = zone.get(CONF_VALVE_SWITCH)
                 virtual_switch = zone.get(CONF_VIRTUAL_SWITCH)
-                
+
                 if not valve_entity:
                     continue
-                
+
                 # Check if zone needs action based on virtual switch state (or valve state if no virtual)
                 check_entity = virtual_switch if virtual_switch else valve_entity
                 target_offset = zone.get(CONF_TARGET_TEMP_OFFSET, DEFAULT_TARGET_TEMP_OFFSET)
@@ -817,7 +817,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                     if zone_status == "underheated":
                         # Zone needs heat - always open valve
                         should_open = True
-                        
+
                         # Check reopen suppression for closed valves
                         if not is_currently_open and valve_entity in self._valve_no_reopen_until:
                             if current_time < self._valve_no_reopen_until[valve_entity]:
@@ -830,11 +830,11 @@ class MultizoneHeaterClimate(ClimateEntity):
                             else:
                                 # Suppression expired
                                 del self._valve_no_reopen_until[valve_entity]
-                    
+
                     elif zone_status == "overheated":
                         # Zone is overheated - always close valve
                         should_open = False
-                    
+
                     else:  # zone_status == "satisfied"
                         # Zone is satisfied - decision depends on mode and main climate target
                         if is_holding_mode:
@@ -844,7 +844,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                             # Heating mode: some zones need heat
                             # Open valve only if zone target >= main target (won't overheat)
                             should_open = zone_target >= desired_main_target
-                            
+
                             _LOGGER.debug(
                                 "Zone %s: Satisfied in heating mode, zone_target=%.1f°C, main_target=%.1f°C, should_open=%s",
                                 zone.get(CONF_ZONE_NAME, valve_entity),
@@ -855,13 +855,13 @@ class MultizoneHeaterClimate(ClimateEntity):
                         else:
                             # No main target calculated - close valve to be safe
                             should_open = False
-                        
+
                         # Apply physical close anticipation for open valves
                         if is_currently_open and should_open:
                             physical_close_threshold = upper_bound - self._physical_close_anticipation
                             if current_temp >= physical_close_threshold:
                                 should_open = False
-                                
+
                                 # Set reopen suppression if closing early
                                 if current_temp < upper_bound:
                                     self._valve_no_reopen_until[valve_entity] = current_time + self._valve_transition_delay
@@ -872,7 +872,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                                         physical_close_threshold,
                                         self._valve_transition_delay,
                                     )
-                
+
                 else:  # COOL mode
                     if zone_status == "overheated":
                         # Zone needs cooling - open valve
@@ -889,7 +889,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                             should_open = zone_target <= desired_main_target
                         else:
                             should_open = False
-                
+
                 _LOGGER.debug(
                     "Zone %s: temp=%.1f°C, target=%.1f°C, range=[%.1f, %.1f]°C, status=%s, mode=%s, should_open=%s",
                     zone.get(CONF_ZONE_NAME, valve_entity),
@@ -901,7 +901,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                     "holding" if is_holding_mode else "heating",
                     should_open,
                 )
-                
+
                 if should_open:
                     zones_needing_action.append(valve_entity)
 
@@ -922,7 +922,7 @@ class MultizoneHeaterClimate(ClimateEntity):
             if self._hvac_mode == HVACMode.HEAT and len(valves_to_turn_on) < self._min_valves_open:
                 # Keep some valves open even if not needed - prefer fallback zones
                 available_valves = list(valves_to_turn_off)
-                
+
                 # Sort to prefer fallback zones
                 fallback_valves = []
                 non_fallback_valves = []
@@ -932,15 +932,15 @@ class MultizoneHeaterClimate(ClimateEntity):
                         if zone.get(CONF_VALVE_SWITCH) == valve:
                             zone_name = zone.get(CONF_ZONE_NAME)
                             break
-                    
+
                     if zone_name in self._fallback_zone_names:
                         fallback_valves.append(valve)
                     else:
                         non_fallback_valves.append(valve)
-                
+
                 # Prioritize fallback zones
                 sorted_valves = fallback_valves + non_fallback_valves
-                
+
                 needed = self._min_valves_open - len(valves_to_turn_on)
                 _LOGGER.debug(
                     "Ensuring minimum valves open: current=%s, minimum=%s, needed=%s",
@@ -955,7 +955,7 @@ class MultizoneHeaterClimate(ClimateEntity):
 
             # Two-phase valve operation: open first, schedule delayed close
             # This prevents blocking for 60 seconds while maintaining safety
-            
+
             # Cancel any pending delayed close task
             if self._delayed_valve_close_task and not self._delayed_valve_close_task.done():
                 try:
@@ -963,7 +963,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                     _LOGGER.debug("Cancelled previous delayed valve close task")
                 except Exception:
                     pass
-            
+
             # Phase 1: Turn on valves that are currently off (immediate, non-blocking)
             valves_actually_turning_on = [v for v in valves_to_turn_on if not current_valve_states.get(v)]
             if valves_actually_turning_on:
@@ -978,7 +978,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                             f"turn on valve {valve_entity}",
                         )
                     )
-                
+
                 _LOGGER.debug("Phase 1: Turning ON %d valves: %s", len(valves_actually_turning_on), valves_actually_turning_on)
                 await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -1004,17 +1004,17 @@ class MultizoneHeaterClimate(ClimateEntity):
                                 f"turn off valve {valve_entity}",
                             )
                         )
-                    
-                    _LOGGER.debug("Phase 2: Turning OFF %d valves immediately (no valves opened): %s", 
+
+                    _LOGGER.debug("Phase 2: Turning OFF %d valves immediately (no valves opened): %s",
                                  len(valves_actually_turning_off), valves_actually_turning_off)
                     await asyncio.gather(*tasks, return_exceptions=True)
 
     def _get_zone_temperature(self, zone: dict[str, Any]) -> float | None:
         """Get current temperature from zone climate entity or sensor.
-        
+
         Args:
             zone: Zone configuration dict
-            
+
         Returns:
             Current temperature or None if unavailable
         """
@@ -1031,7 +1031,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                             "Unable to parse current temperature from climate %s",
                             zone[CONF_ZONE_CLIMATE],
                         )
-        
+
         # Fall back to temperature sensor
         if zone.get(CONF_TEMPERATURE_SENSOR):
             sensor_state = self.hass.states.get(zone[CONF_TEMPERATURE_SENSOR])
@@ -1043,15 +1043,15 @@ class MultizoneHeaterClimate(ClimateEntity):
                         "Unable to parse temperature from sensor %s",
                         zone[CONF_TEMPERATURE_SENSOR],
                     )
-        
+
         return None
 
     def _get_zone_target_temperature(self, zone: dict[str, Any]) -> float:
         """Get target temperature from zone climate entity or use default.
-        
+
         Args:
             zone: Zone configuration dict
-            
+
         Returns:
             Target temperature (from zone climate or multizone heater default)
         """
@@ -1068,7 +1068,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                             "Unable to parse target temperature from climate %s, using default",
                             zone[CONF_ZONE_CLIMATE],
                         )
-        
+
         # Fall back to multizone heater target
         return self._target_temperature
 
@@ -1079,9 +1079,9 @@ class MultizoneHeaterClimate(ClimateEntity):
             valve_entity = zone.get(CONF_VALVE_SWITCH)
             if not valve_entity:
                 continue
-                
+
             state = self.hass.states.get(valve_entity)
-            
+
             if state:
                 valve_states[valve_entity] = state.state == STATE_ON
             else:
@@ -1105,15 +1105,15 @@ class MultizoneHeaterClimate(ClimateEntity):
 
     async def _async_delayed_valve_close(self, valves_to_close: list[str]) -> None:
         """Close valves after transition delay (non-blocking).
-        
+
         Args:
             valves_to_close: List of valve entity IDs to close after delay
         """
         try:
-            _LOGGER.debug("Waiting %ds for valve transition before closing %d valves", 
+            _LOGGER.debug("Waiting %ds for valve transition before closing %d valves",
                          self._valve_transition_delay, len(valves_to_close))
             await asyncio.sleep(self._valve_transition_delay)
-            
+
             # Close the valves
             tasks = []
             for valve_entity in valves_to_close:
@@ -1126,7 +1126,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                         f"turn off valve {valve_entity}",
                     )
                 )
-            
+
             _LOGGER.debug("Phase 2 (delayed): Turning OFF %d valves: %s", len(valves_to_close), valves_to_close)
             await asyncio.gather(*tasks, return_exceptions=True)
         except asyncio.CancelledError:
@@ -1170,7 +1170,7 @@ class MultizoneHeaterClimate(ClimateEntity):
 
             tasks = []
             fallback_valve_entities = []
-            
+
             # Get fallback zone valve entities
             for zone in self._zones:
                 zone_name = zone.get(CONF_ZONE_NAME)
@@ -1181,7 +1181,7 @@ class MultizoneHeaterClimate(ClimateEntity):
 
             # Get all valve entities
             all_valve_entities = [zone.get(CONF_VALVE_SWITCH) for zone in self._zones if zone.get(CONF_VALVE_SWITCH)]
-            
+
             # Get current valve states
             current_valve_states = await self._async_get_valve_states()
 
@@ -1215,7 +1215,7 @@ class MultizoneHeaterClimate(ClimateEntity):
             # Execute all valve changes in parallel
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
-                
+
             _LOGGER.info(
                 "Cooling mode: Opened %d fallback zone valve(s), closed %d non-fallback valve(s)",
                 len(fallback_valve_entities),
@@ -1224,14 +1224,14 @@ class MultizoneHeaterClimate(ClimateEntity):
 
     async def _async_close_valves_except_fallback(self) -> None:
         """Close all valves except fallback zones.
-        
+
         This is called when the main climate HVAC mode is OFF.
         We keep fallback zones open to maintain pump safety.
         """
         async with self._update_lock:
             tasks = []
             fallback_valve_entities = []
-            
+
             # Get fallback zone valve entities
             for zone in self._zones:
                 zone_name = zone.get(CONF_ZONE_NAME)
@@ -1242,7 +1242,7 @@ class MultizoneHeaterClimate(ClimateEntity):
 
             # Get all valve entities
             all_valve_entities = [zone.get(CONF_VALVE_SWITCH) for zone in self._zones if zone.get(CONF_VALVE_SWITCH)]
-            
+
             # Get current valve states
             current_valve_states = await self._async_get_valve_states()
 
