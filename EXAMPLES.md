@@ -1,10 +1,10 @@
 # Multizone Heater - Example Usage
 
-This document provides examples of how to use the Multizone Heater integration in various scenarios.
+This document provides examples of how to use the Multizone Heater integration in various scenarios, including basic setups, zone climate patterns, and cooling mode.
 
-## Basic Setup Example
+## Example 1: Basic Sensor + Valve Pattern
 
-### Scenario: 3-Zone Heating System
+### Scenario: 3-Zone Heating System (Simple)
 
 You have a heating system with:
 - Living room with temperature sensor `sensor.living_room_temperature` and valve `switch.living_room_valve`
@@ -16,37 +16,157 @@ You have a heating system with:
 1. Go to **Settings** → **Devices & Services**
 2. Click **Add Integration**
 3. Search for "Multizone Heater"
-4. Configure main settings:
+
+4. **Step 1 - Main Settings:**
    - Leave **Main Climate Entity** empty (no main thermostat)
-   - **Temperature Aggregation**: Select "average"
+   - **Temperature Aggregation Method**: Select "average"
+   - **Temperature Aggregation Weight**: 50% (matches average)
    - **Minimum Valves Open**: Enter 1
 
-5. Add first zone:
+5. **Step 2 - Add Zones:**
+   
+   First zone:
    - **Zone Name**: "Living Room"
+   - **Zone Climate Entity**: Leave empty
    - **Temperature Sensor**: `sensor.living_room_temperature`
-   - **Valve Switch**: `switch.living_room_valve`
-   - **Target Temperature Offset**: 0.5
+   - **Physical Valve Switch**: `switch.living_room_valve`
+   - **Virtual Switch**: Leave empty
+   - **Opening Offset**: 0.5°C
+   - **Closing Offset**: 0.2°C
    - **Add Another Zone**: ✓ (checked)
-
-6. Add second zone:
+   
+   Second zone:
    - **Zone Name**: "Bedroom"
+   - **Zone Climate Entity**: Leave empty
    - **Temperature Sensor**: `sensor.bedroom_temperature`
-   - **Valve Switch**: `switch.bedroom_valve`
-   - **Target Temperature Offset**: 0.5
+   - **Physical Valve Switch**: `switch.bedroom_valve`
+   - **Virtual Switch**: Leave empty
+   - **Opening Offset**: 0.5°C
+   - **Closing Offset**: 0.2°C
    - **Add Another Zone**: ✓ (checked)
-
-7. Add third zone:
+   
+   Third zone:
    - **Zone Name**: "Kitchen"
+   - **Zone Climate Entity**: Leave empty
    - **Temperature Sensor**: `sensor.kitchen_temperature`
-   - **Valve Switch**: `switch.kitchen_valve`
-   - **Target Temperature Offset**: 0.5
-   - **Add Another Zone**: ✗ (unchecked) - finish setup
+   - **Physical Valve Switch**: `switch.kitchen_valve`
+   - **Virtual Switch**: Leave empty
+   - **Opening Offset**: 0.5°C
+   - **Closing Offset**: 0.2°C
+   - **Add Another Zone**: ✗ (unchecked) - finish
 
-## Advanced Example with Main Climate
+6. **Step 3 - Fallback Zones:**
+   - **Fallback Zones**: Select "Living Room" (ensures pump safety)
 
-### Scenario: Integrated with Central Thermostat
+## Example 2: Zone Climate + Virtual Switch Pattern
 
-You have a central boiler controlled by `climate.main_thermostat` and want the multizone system to coordinate with it.
+### Scenario: Generic Thermostat Integration
+
+You have zone climate entities (e.g., Generic Thermostat) and want to coordinate them without conflicts.
+
+### Prerequisites
+
+First, create helper switches for each zone:
+1. Go to **Settings** → **Devices & Services** → **Helpers**
+2. Click **Create Helper** → **Toggle**
+3. Create:
+   - `input_boolean.living_room_virtual_valve`
+   - `input_boolean.bedroom_virtual_valve`
+   - `input_boolean.kitchen_virtual_valve`
+
+### Configure Generic Thermostats
+
+```yaml
+climate:
+  - platform: generic_thermostat
+    name: Living Room Thermostat
+    heater: input_boolean.living_room_virtual_valve  # Virtual switch, not physical valve
+    target_sensor: sensor.living_room_temperature
+    min_temp: 15
+    max_temp: 25
+    
+  - platform: generic_thermostat
+    name: Bedroom Thermostat
+    heater: input_boolean.bedroom_virtual_valve
+    target_sensor: sensor.bedroom_temperature
+    min_temp: 15
+    max_temp: 25
+    
+  - platform: generic_thermostat
+    name: Kitchen Thermostat
+    heater: input_boolean.kitchen_virtual_valve
+    target_sensor: sensor.kitchen_temperature
+    min_temp: 15
+    max_temp: 25
+```
+
+### Multizone Heater Configuration
+
+1. **Step 1 - Main Settings:**
+   - **Main Climate Entity**: `climate.main_boiler` (optional)
+   - **Temperature Aggregation Method**: "average"
+   - **Temperature Aggregation Weight**: 50%
+   - **Minimum Valves Open**: 1
+
+2. **Step 2 - Add Zones:**
+   
+   Living Room:
+   - **Zone Name**: "Living Room"
+   - **Zone Climate Entity**: `climate.living_room_thermostat`
+   - **Temperature Sensor**: Leave empty (uses climate entity)
+   - **Physical Valve Switch**: `switch.living_room_valve`
+   - **Virtual Switch**: `input_boolean.living_room_virtual_valve`
+   - **Opening Offset**: 0.5°C
+   - **Closing Offset**: 0.2°C
+   - **Add Another Zone**: ✓
+   
+   (Repeat for Bedroom and Kitchen zones)
+
+3. **Step 3 - Fallback Zones:**
+   - **Fallback Zones**: Select "Living Room"
+
+**How this works:**
+- Generic Thermostat controls virtual switch based on temperature
+- Multizone Heater monitors virtual switch state
+- Multizone Heater controls physical valve
+- No conflicts - clean separation of responsibilities
+
+## Example 3: Heating + Cooling System
+
+### Scenario: Main Climate with Cooling Support
+
+You have a heat pump that supports both heating and cooling.
+
+### Configuration
+
+1. **Step 1 - Main Settings:**
+   - **Main Climate Entity**: `climate.heat_pump` (supports heating AND cooling)
+   - **Temperature Aggregation Method**: "average"
+   - **Temperature Aggregation Weight**: 50%
+   - **Minimum Valves Open**: 1
+
+2. **Step 2 - Add Zones** (configure as normal)
+
+3. **Step 3 - Fallback Zones:**
+   - **Fallback Zones**: Select "Living Room" and "Bedroom"
+   - These zones will keep valves open during cooling mode
+
+### What Happens
+
+The integration will detect that `climate.heat_pump` supports cooling and automatically:
+- Add COOL to available HVAC modes
+- Validate zone climate entities for cooling support
+- Log warnings for zones without cooling capability
+- During cooling mode:
+  - Open only fallback zone valves (Living Room, Bedroom)
+  - Close all non-fallback valves (Kitchen)
+  - Set main climate to COOL mode
+
+## Example 4: Advanced with Main Climate
+
+### Scenario: Integrated with Central Boiler
+
+You have a central boiler controlled by `climate.main_thermostat`.
 
 Configuration changes from basic example:
 - **Main Climate Entity**: Select `climate.main_thermostat`
