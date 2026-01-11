@@ -40,7 +40,6 @@ from .const import (
     CONF_PHYSICAL_CLOSE_ANTICIPATION,
     CONF_TARGET_TEMP_OFFSET,
     CONF_TARGET_TEMP_OFFSET_CLOSING,
-    CONF_TEMPERATURE_AGGREGATION,
     CONF_TEMPERATURE_AGGREGATION_WEIGHT,
     CONF_TEMPERATURE_SENSOR,
     CONF_VALVE_SWITCH,
@@ -60,14 +59,10 @@ from .const import (
     DEFAULT_RECONCILIATION_INTERVAL,
     DEFAULT_TARGET_TEMP_OFFSET,
     DEFAULT_TARGET_TEMP_OFFSET_CLOSING,
-    DEFAULT_TEMPERATURE_AGGREGATION,
     DEFAULT_TEMPERATURE_AGGREGATION_WEIGHT,
     DEFAULT_VALVE_TRANSITION_DELAY,
     DEFAULT_ZONE_TARGET_CHANGE_DELAY,
     DOMAIN,
-    TEMP_AGG_AVERAGE,
-    TEMP_AGG_MAX,
-    TEMP_AGG_MIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -84,9 +79,6 @@ async def async_setup_entry(
     zones = config.get(CONF_ZONES, [])
     main_climate = config.get(CONF_MAIN_CLIMATE)
     main_temp_sensor = config.get(CONF_MAIN_TEMP_SENSOR)
-    temperature_aggregation = config.get(
-        CONF_TEMPERATURE_AGGREGATION, DEFAULT_TEMPERATURE_AGGREGATION
-    )
     temperature_aggregation_weight = config.get(
         CONF_TEMPERATURE_AGGREGATION_WEIGHT, DEFAULT_TEMPERATURE_AGGREGATION_WEIGHT
     )
@@ -107,7 +99,6 @@ async def async_setup_entry(
             zones,
             main_climate,
             main_temp_sensor,
-            temperature_aggregation,
             temperature_aggregation_weight,
             min_valves_open,
             fallback_zones,
@@ -145,7 +136,6 @@ class MultizoneHeaterClimate(ClimateEntity):
         zones: list[dict[str, Any]],
         main_climate: str | None,
         main_temp_sensor: str | None,
-        temperature_aggregation: str,
         temperature_aggregation_weight: int,
         min_valves_open: int,
         fallback_zones: list[str],
@@ -163,7 +153,6 @@ class MultizoneHeaterClimate(ClimateEntity):
         self._zones = zones
         self._main_climate_entity = main_climate
         self._main_temp_sensor = main_temp_sensor
-        self._temperature_aggregation = temperature_aggregation
         self._temperature_aggregation_weight = temperature_aggregation_weight
         # Ensure min_valves_open is always an integer to prevent TypeError in range()
         # Convert to int to handle cases where it may have been stored as a float
@@ -526,28 +515,21 @@ class MultizoneHeaterClimate(ClimateEntity):
                 temperatures.append(temp)
 
         if temperatures:
-            if self._temperature_aggregation == TEMP_AGG_AVERAGE:
-                self._current_temperature = sum(temperatures) / len(temperatures)
-            elif self._temperature_aggregation == TEMP_AGG_MIN:
-                self._current_temperature = min(temperatures)
-            elif self._temperature_aggregation == TEMP_AGG_MAX:
-                self._current_temperature = max(temperatures)
+            # Use weight-based aggregation (0% = min, 50% = avg, 100% = max)
+            min_temp = min(temperatures)
+            max_temp = max(temperatures)
+            avg_temp = sum(temperatures) / len(temperatures)
+            
+            # Interpolate between min and avg (0-50%) or avg and max (50-100%)
+            weight = self._temperature_aggregation_weight
+            if weight <= 50:
+                # Interpolate between min and avg
+                ratio = weight / 50.0
+                self._current_temperature = min_temp + (avg_temp - min_temp) * ratio
             else:
-                # Use weight-based aggregation (0% = min, 50% = avg, 100% = max)
-                min_temp = min(temperatures)
-                max_temp = max(temperatures)
-                avg_temp = sum(temperatures) / len(temperatures)
-                
-                # Interpolate between min and avg (0-50%) or avg and max (50-100%)
-                weight = self._temperature_aggregation_weight
-                if weight <= 50:
-                    # Interpolate between min and avg
-                    ratio = weight / 50.0
-                    self._current_temperature = min_temp + (avg_temp - min_temp) * ratio
-                else:
-                    # Interpolate between avg and max
-                    ratio = (weight - 50) / 50.0
-                    self._current_temperature = avg_temp + (max_temp - avg_temp) * ratio
+                # Interpolate between avg and max
+                ratio = (weight - 50) / 50.0
+                self._current_temperature = avg_temp + (max_temp - avg_temp) * ratio
         else:
             self._current_temperature = None
 

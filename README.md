@@ -62,15 +62,21 @@ This integration provides an efficient, asynchronous Python-based solution for m
    - **Step 1: Main Settings**
      - **Main Climate Entity** (optional): Select your main climate/thermostat entity (e.g., boiler controller)
      - **Main Temperature Sensor** (optional): Override main climate's temperature reading with a specific sensor
-     - **Temperature Aggregation Method**: Choose preset method (average, minimum, or maximum)
-     - **Temperature Aggregation Weight**: Fine-tune with 0-100% slider (0% = minimum, 50% = average, 100% = maximum)
+     - **Current Temperature Calculation** (slider 0-100%): How to calculate the displayed current temperature from all zones
+       - 0% = Use coldest zone temperature (ensures all zones get heated)
+       - 50% = Use average temperature (balanced approach, default)
+       - 100% = Use warmest zone temperature (energy efficient)
+     - **Main Target When All Zones Satisfied** (slider 0-100%): What to set the main climate target when all zones have reached their targets
+       - 0% = Use lowest zone target (energy efficient)
+       - 50% = Use average zone target (balanced approach, default)
+       - 100% = Use highest zone target (keeps boiler warmer)
+       - This prevents the boiler from shutting down completely while maintaining efficiency
      - **Minimum Valves Open**: Number of valves to keep open at all times for system safety (default: 1)
      - **Compensation Factor**: Corridor compensation for main climate target (default: 0.66, range: 0.0-1.0)
      - **Valve Transition Delay**: Seconds to wait between opening and closing valves (default: 60s, range: 5-300s)
      - **Main Min/Max Temperature**: Temperature range for main climate (default: 18.0-30.0°C)
      - **Main Change Threshold**: Minimum temperature change to update main climate (default: 0.1°C)
      - **Physical Close Anticipation**: Early close offset to prevent overshoot (default: 0.6°C)
-     - **All Satisfied Mode**: Slider for main target when all zones satisfied (0=min, 50=avg, 100=max, default: 50)
    
    - **Step 2: Add Zones**
      - **Zone Name**: Name for the zone (e.g., "Living Room", "Bedroom")
@@ -154,16 +160,24 @@ automation:
 
 ### Temperature Aggregation
 
-The integration monitors temperature sensors in all configured zones and aggregates them based on your chosen method:
+The integration monitors temperature sensors in all configured zones and aggregates them using the **Current Temperature Calculation** slider (0-100%):
 
-- **Average**: Uses the mean temperature across all zones
-- **Minimum**: Uses the coldest zone's temperature (ensures all zones reach target)
-- **Maximum**: Uses the warmest zone's temperature
-- **Weight-based (0-100% slider)**: Allows fine-grained control between minimum and maximum
-  - 0% = Uses minimum temperature (coldest zone)
-  - 50% = Uses average temperature (mean of all zones)
-  - 100% = Uses maximum temperature (warmest zone)
-  - Values between interpolate smoothly (e.g., 25% is halfway between min and average)
+- **0%**: Uses the **coldest zone** temperature
+  - Best for ensuring all zones reach their target temperature
+  - The system will keep heating until even the coldest zone is warm
+  
+- **50%** (default): Uses the **average** temperature across all zones
+  - Balanced approach between comfort and efficiency
+  - Most common setting for typical homes
+  
+- **100%**: Uses the **warmest zone** temperature
+  - Most energy efficient setting
+  - May result in some zones not reaching target if they heat unevenly
+
+- **Values between**: Smoothly interpolate between these extremes
+  - For example, 25% is halfway between coldest and average
+
+**Important Note:** This slider controls what temperature is **displayed** on the climate entity and affects when the system reports it is heating/cooling/idle. It does NOT control individual valve operation - each valve operates based on its own zone's actual temperature.
 
 ### Main Climate Compensation Logic
 
@@ -195,12 +209,25 @@ per_zone_desired_main = zone_target - compensation_factor × (zone_current - zon
 The integration uses the **minimum** of all per-zone desired temperatures.
 
 #### All Zones Satisfied Behavior
-When all zones are satisfied (no heating/cooling needed), the integration uses the "All Satisfied Mode" slider:
-- **0%**: Uses minimum zone target
-- **50%**: Uses average zone target (default)
-- **100%**: Uses maximum zone target
+When all zones are satisfied (no heating/cooling needed), the integration uses the **Main Target When All Zones Satisfied** slider to set the main climate target:
 
-This prevents the main climate from shutting down completely while maintaining efficiency.
+- **0%**: Uses **lowest zone target**
+  - Most energy efficient
+  - Boiler runs at minimum necessary temperature
+  
+- **50%** (default): Uses **average zone target**
+  - Balanced approach
+  - Keeps boiler ready for quick response
+  
+- **100%**: Uses **highest zone target**
+  - Keeps boiler warmest
+  - Fastest response when zones need heat again
+
+**Why is this needed?** This prevents the main climate from shutting down completely while maintaining efficiency. When all zones are satisfied, the boiler needs a target temperature to maintain - this slider controls what that target is.
+
+**Difference from Current Temperature Calculation:**
+- **Current Temperature Calculation**: Controls what temperature is DISPLAYED (affects current_temperature reading)
+- **Main Target When All Zones Satisfied**: Controls what the MAIN BOILER target is set to when zones don't need heating (affects main climate entity operation only)
 
 ### Valve Control Logic with Hysteresis
 
