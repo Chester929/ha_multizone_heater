@@ -49,11 +49,44 @@ This integration provides an efficient, asynchronous Python-based solution for m
    
    - **Step 2**: Add zones
      - **Zone Name**: Name for the zone (e.g., "Living Room", "Bedroom")
-     - **Temperature Sensor**: Select the temperature sensor for this zone
-     - **Valve Switch**: Select the switch entity controlling this zone's valve
+     - **Zone Climate Entity** (optional): Climate entity for the zone (provides temperature)
+     - **Temperature Sensor Override** (optional): Override temperature source with a specific sensor
+     - **Physical Valve Switch** (optional): Physical valve entity (required if using virtual switch pattern)
+     - **Virtual Switch** (optional): Virtual/helper switch controlled by zone climate (required if using physical valve)
      - **Opening Offset Below Target**: Temperature offset below target to trigger valve opening (default: 0.5°C)
      - **Closing Offset Above Target**: Temperature offset above target to trigger valve closing (default: 0.0°C, creates hysteresis)
      - **Add Another Zone**: Check to add more zones, uncheck to finish
+
+### Zone Configuration Patterns
+
+**Pattern 1: Zone Climate + Virtual Switch Pattern (Recommended for Generic Thermostat)**
+- Best for zones with Generic Thermostat climate entities
+- Prevents conflicts where both climate entity and integration try to control the same valve
+- Setup:
+  1. Create a virtual/helper switch for each zone (`input_boolean.zone_virtual_valve`)
+  2. Configure Generic Thermostat to control the virtual switch (not physical valve)
+  3. Provide: Zone Climate + Physical Valve + Virtual Switch
+- How it works:
+  - Generic Thermostat controls virtual switch based on zone temperature
+  - Integration monitors virtual switch AND controls physical valve
+  - Integration coordinates across zones while respecting individual zone requests
+
+**Pattern 2: Zone Climate Only**
+- For zones with climate entities that don't control valves
+- Provide: Zone Climate only
+- Integration reads temperature from climate entity
+- No valve control for this zone (monitoring only)
+
+**Pattern 3: Temperature Sensor + Valve**
+- For zones without climate entities
+- Provide: Temperature Sensor + Physical Valve
+- Integration directly reads sensor and controls valve
+
+### Important Notes
+
+- **Temperature Source**: At least one of Zone Climate OR Temperature Sensor must be provided
+- **Valve Control**: If providing a physical valve, virtual switch is REQUIRED (virtual switch pattern)
+- **No Duplicates**: Each entity can only be used once across all zones
 
 ## Usage
 

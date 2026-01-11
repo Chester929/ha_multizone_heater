@@ -26,6 +26,8 @@ from .const import (
     CONF_TEMPERATURE_AGGREGATION_WEIGHT,
     CONF_TEMPERATURE_SENSOR,
     CONF_VALVE_SWITCH,
+    CONF_VIRTUAL_SWITCH,
+    CONF_ZONE_CLIMATE,
     CONF_ZONE_NAME,
     CONF_ZONES,
     DEFAULT_MIN_VALVES_OPEN,
@@ -114,30 +116,55 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
 
         if user_input is not None:
-            if user_input.get("add_another"):
-                # Add the zone
-                zone_data = {
-                    CONF_ZONE_NAME: user_input[CONF_ZONE_NAME],
-                    CONF_TEMPERATURE_SENSOR: user_input[CONF_TEMPERATURE_SENSOR],
-                    CONF_VALVE_SWITCH: user_input[CONF_VALVE_SWITCH],
-                    CONF_TARGET_TEMP_OFFSET: user_input.get(
-                        CONF_TARGET_TEMP_OFFSET, DEFAULT_TARGET_TEMP_OFFSET
-                    ),
-                    CONF_TARGET_TEMP_OFFSET_CLOSING: user_input.get(
-                        CONF_TARGET_TEMP_OFFSET_CLOSING, DEFAULT_TARGET_TEMP_OFFSET_CLOSING
-                    ),
-                }
-                self._zones.append(zone_data)
+            # Validate zone configuration
+            zone_climate = user_input.get(CONF_ZONE_CLIMATE)
+            temp_sensor = user_input.get(CONF_TEMPERATURE_SENSOR)
+            valve_switch = user_input.get(CONF_VALVE_SWITCH)
+            virtual_switch = user_input.get(CONF_VIRTUAL_SWITCH)
 
-                # Return to add another zone
-                return await self.async_step_add_zone()
-            else:
-                # Check if we need to add the current zone
-                if user_input.get(CONF_ZONE_NAME):
+            # Validate that at least one temperature source is provided
+            if not zone_climate and not temp_sensor:
+                errors[CONF_ZONE_CLIMATE] = "need_temp_source"
+                errors[CONF_TEMPERATURE_SENSOR] = "need_temp_source"
+
+            # Validate that both valve and virtual switch are provided together
+            if valve_switch and not virtual_switch:
+                errors[CONF_VIRTUAL_SWITCH] = "need_virtual_switch"
+            elif virtual_switch and not valve_switch:
+                errors[CONF_VALVE_SWITCH] = "need_physical_valve"
+
+            # Check for duplicate entities across all zones
+            if not errors:
+                all_entities = []
+                for zone in self._zones:
+                    if zone.get(CONF_ZONE_CLIMATE):
+                        all_entities.append(zone[CONF_ZONE_CLIMATE])
+                    if zone.get(CONF_TEMPERATURE_SENSOR):
+                        all_entities.append(zone[CONF_TEMPERATURE_SENSOR])
+                    if zone.get(CONF_VALVE_SWITCH):
+                        all_entities.append(zone[CONF_VALVE_SWITCH])
+                    if zone.get(CONF_VIRTUAL_SWITCH):
+                        all_entities.append(zone[CONF_VIRTUAL_SWITCH])
+
+                # Check for duplicates in current input
+                if zone_climate and zone_climate in all_entities:
+                    errors[CONF_ZONE_CLIMATE] = "duplicate_entity"
+                if temp_sensor and temp_sensor in all_entities:
+                    errors[CONF_TEMPERATURE_SENSOR] = "duplicate_entity"
+                if valve_switch and valve_switch in all_entities:
+                    errors[CONF_VALVE_SWITCH] = "duplicate_entity"
+                if virtual_switch and virtual_switch in all_entities:
+                    errors[CONF_VIRTUAL_SWITCH] = "duplicate_entity"
+
+            if not errors:
+                if user_input.get("add_another"):
+                    # Add the zone
                     zone_data = {
                         CONF_ZONE_NAME: user_input[CONF_ZONE_NAME],
-                        CONF_TEMPERATURE_SENSOR: user_input[CONF_TEMPERATURE_SENSOR],
-                        CONF_VALVE_SWITCH: user_input[CONF_VALVE_SWITCH],
+                        CONF_ZONE_CLIMATE: zone_climate,
+                        CONF_TEMPERATURE_SENSOR: temp_sensor,
+                        CONF_VALVE_SWITCH: valve_switch,
+                        CONF_VIRTUAL_SWITCH: virtual_switch,
                         CONF_TARGET_TEMP_OFFSET: user_input.get(
                             CONF_TARGET_TEMP_OFFSET, DEFAULT_TARGET_TEMP_OFFSET
                         ),
@@ -147,14 +174,34 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     }
                     self._zones.append(zone_data)
 
-                # Validate that at least one zone was added
-                if not self._zones:
-                    errors["base"] = "no_zones"
-                    return self.async_show_form(
-                        step_id="add_zone",
-                        data_schema=self._get_zone_schema(),
-                        errors=errors,
-                    )
+                    # Return to add another zone
+                    return await self.async_step_add_zone()
+                else:
+                    # Check if we need to add the current zone
+                    if user_input.get(CONF_ZONE_NAME):
+                        zone_data = {
+                            CONF_ZONE_NAME: user_input[CONF_ZONE_NAME],
+                            CONF_ZONE_CLIMATE: zone_climate,
+                            CONF_TEMPERATURE_SENSOR: temp_sensor,
+                            CONF_VALVE_SWITCH: valve_switch,
+                            CONF_VIRTUAL_SWITCH: virtual_switch,
+                            CONF_TARGET_TEMP_OFFSET: user_input.get(
+                                CONF_TARGET_TEMP_OFFSET, DEFAULT_TARGET_TEMP_OFFSET
+                            ),
+                            CONF_TARGET_TEMP_OFFSET_CLOSING: user_input.get(
+                                CONF_TARGET_TEMP_OFFSET_CLOSING, DEFAULT_TARGET_TEMP_OFFSET_CLOSING
+                            ),
+                        }
+                        self._zones.append(zone_data)
+
+                    # Validate that at least one zone was added
+                    if not self._zones:
+                        errors["base"] = "no_zones"
+                        return self.async_show_form(
+                            step_id="add_zone",
+                            data_schema=self._get_zone_schema(),
+                            errors=errors,
+                        )
 
                 # Create the config entry
                 return self.async_create_entry(
@@ -179,11 +226,17 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return vol.Schema(
             {
                 vol.Required(CONF_ZONE_NAME): str,
-                vol.Required(CONF_TEMPERATURE_SENSOR): EntitySelector(
+                vol.Optional(CONF_ZONE_CLIMATE): EntitySelector(
+                    EntitySelectorConfig(domain="climate")
+                ),
+                vol.Optional(CONF_TEMPERATURE_SENSOR): EntitySelector(
                     EntitySelectorConfig(domain="sensor")
                 ),
-                vol.Required(CONF_VALVE_SWITCH): EntitySelector(
-                    EntitySelectorConfig(domain="switch")
+                vol.Optional(CONF_VALVE_SWITCH): EntitySelector(
+                    EntitySelectorConfig(domain=["switch", "input_boolean"])
+                ),
+                vol.Optional(CONF_VIRTUAL_SWITCH): EntitySelector(
+                    EntitySelectorConfig(domain=["switch", "input_boolean"])
                 ),
                 vol.Optional(
                     CONF_TARGET_TEMP_OFFSET, default=DEFAULT_TARGET_TEMP_OFFSET

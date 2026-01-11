@@ -34,6 +34,8 @@ from .const import (
     CONF_TEMPERATURE_AGGREGATION_WEIGHT,
     CONF_TEMPERATURE_SENSOR,
     CONF_VALVE_SWITCH,
+    CONF_VIRTUAL_SWITCH,
+    CONF_ZONE_CLIMATE,
     CONF_ZONE_NAME,
     CONF_ZONES,
     DEFAULT_HVAC_ACTION_DEADBAND,
@@ -138,18 +140,25 @@ class MultizoneHeaterClimate(ClimateEntity):
 
     async def async_added_to_hass(self) -> None:
         """Run when entity about to be added to hass."""
-        # Track all temperature sensors
-        sensor_entities = [zone[CONF_TEMPERATURE_SENSOR] for zone in self._zones]
+        # Track all temperature sources (zone climate entities and sensors)
+        tracked_entities = []
+        for zone in self._zones:
+            if zone.get(CONF_ZONE_CLIMATE):
+                tracked_entities.append(zone[CONF_ZONE_CLIMATE])
+            if zone.get(CONF_TEMPERATURE_SENSOR):
+                tracked_entities.append(zone[CONF_TEMPERATURE_SENSOR])
+            if zone.get(CONF_VIRTUAL_SWITCH):
+                tracked_entities.append(zone[CONF_VIRTUAL_SWITCH])
         
         @callback
         def async_sensor_changed(event):
             """Handle temperature sensor changes."""
             self.async_schedule_update_ha_state(True)
 
-        for sensor in sensor_entities:
+        for entity in tracked_entities:
             self.async_on_remove(
                 async_track_state_change_event(
-                    self.hass, sensor, async_sensor_changed
+                    self.hass, entity, async_sensor_changed
                 )
             )
 
@@ -275,19 +284,37 @@ class MultizoneHeaterClimate(ClimateEntity):
         # Calculate aggregated current temperature
         temperatures = []
         for zone in self._zones:
-            sensor_entity = zone[CONF_TEMPERATURE_SENSOR]
-            state = self.hass.states.get(sensor_entity)
+            # Try to get temperature from zone climate entity first, then sensor
+            temp = None
             
-            if state and state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                try:
-                    temp = float(state.state)
-                    temperatures.append(temp)
-                except (ValueError, TypeError):
-                    _LOGGER.warning(
-                        "Unable to parse temperature from %s: %s",
-                        sensor_entity,
-                        state.state,
-                    )
+            if zone.get(CONF_ZONE_CLIMATE):
+                climate_state = self.hass.states.get(zone[CONF_ZONE_CLIMATE])
+                if climate_state and climate_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                    temp_attr = climate_state.attributes.get("current_temperature")
+                    if temp_attr is not None:
+                        try:
+                            temp = float(temp_attr)
+                        except (ValueError, TypeError):
+                            _LOGGER.warning(
+                                "Unable to parse temperature from climate %s",
+                                zone[CONF_ZONE_CLIMATE],
+                            )
+            
+            # If no temp from climate entity, try sensor override
+            if temp is None and zone.get(CONF_TEMPERATURE_SENSOR):
+                sensor_state = self.hass.states.get(zone[CONF_TEMPERATURE_SENSOR])
+                if sensor_state and sensor_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                    try:
+                        temp = float(sensor_state.state)
+                    except (ValueError, TypeError):
+                        _LOGGER.warning(
+                            "Unable to parse temperature from %s: %s",
+                            zone[CONF_TEMPERATURE_SENSOR],
+                            sensor_state.state,
+                        )
+            
+            if temp is not None:
+                temperatures.append(temp)
 
         if temperatures:
             if self._temperature_aggregation == TEMP_AGG_AVERAGE:
@@ -343,39 +370,61 @@ class MultizoneHeaterClimate(ClimateEntity):
             zones_needing_heat = []
 
             for zone in self._zones:
-                sensor_entity = zone[CONF_TEMPERATURE_SENSOR]
-                valve_entity = zone[CONF_VALVE_SWITCH]
+                # Get temperature from zone climate or sensor
+                current_temp = None
+                if zone.get(CONF_ZONE_CLIMATE):
+                    climate_state = self.hass.states.get(zone[CONF_ZONE_CLIMATE])
+                    if climate_state and climate_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                        temp_attr = climate_state.attributes.get("current_temperature")
+                        if temp_attr is not None:
+                            try:
+                                current_temp = float(temp_attr)
+                            except (ValueError, TypeError):
+                                pass
+                
+                if current_temp is None and zone.get(CONF_TEMPERATURE_SENSOR):
+                    sensor_state = self.hass.states.get(zone[CONF_TEMPERATURE_SENSOR])
+                    if sensor_state and sensor_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                        try:
+                            current_temp = float(sensor_state.state)
+                        except (ValueError, TypeError):
+                            pass
+
+                if current_temp is None:
+                    continue
+
+                # Determine which switch to use for checking state
+                # Use virtual switch if available (for coordination with zone climate)
+                # Otherwise use physical valve
+                valve_entity = zone.get(CONF_VALVE_SWITCH)
+                virtual_switch = zone.get(CONF_VIRTUAL_SWITCH)
+                
+                if not valve_entity:
+                    continue
+                
+                # Check if zone needs heating based on virtual switch state (or valve state if no virtual)
+                check_entity = virtual_switch if virtual_switch else valve_entity
                 target_offset = zone.get(CONF_TARGET_TEMP_OFFSET, DEFAULT_TARGET_TEMP_OFFSET)
                 target_offset_closing = zone.get(CONF_TARGET_TEMP_OFFSET_CLOSING, DEFAULT_TARGET_TEMP_OFFSET_CLOSING)
 
-                state = self.hass.states.get(sensor_entity)
+                zone_target = self._target_temperature
+
+                # Get current valve state (or virtual switch state)
+                check_state = self.hass.states.get(check_entity)
+                is_currently_open = check_state and check_state.state == STATE_ON
+
+                # Determine if valve should be open with hysteresis
+                # If valve is currently closed, open when below (target - offset)
+                # If valve is currently open, close when above (target + offset_closing)
+                if is_currently_open:
+                    # Use closing offset for already-open valves
+                    should_open = current_temp < (zone_target + target_offset_closing)
+                else:
+                    # Use opening offset for closed valves
+                    should_open = current_temp < (zone_target - target_offset)
                 
-                if state and state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                    try:
-                        current_temp = float(state.state)
-                        zone_target = self._target_temperature
-
-                        # Get current valve state
-                        valve_state = self.hass.states.get(valve_entity)
-                        is_currently_open = valve_state and valve_state.state == STATE_ON
-
-                        # Determine if valve should be open with hysteresis
-                        # If valve is currently closed, open when below (target - offset)
-                        # If valve is currently open, close when above (target + offset_closing)
-                        if is_currently_open:
-                            # Use closing offset for already-open valves
-                            should_open = current_temp < (zone_target + target_offset_closing)
-                        else:
-                            # Use opening offset for closed valves
-                            should_open = current_temp < (zone_target - target_offset)
-                        
-                        if should_open:
-                            zones_needing_heat.append(valve_entity)
-
-                    except (ValueError, TypeError):
-                        _LOGGER.warning(
-                            "Unable to parse temperature from %s", sensor_entity
-                        )
+                if should_open:
+                    zones_needing_heat.append(valve_entity)
 
             # Get current valve states
             current_valve_states = await self._async_get_valve_states()
@@ -439,10 +488,13 @@ class MultizoneHeaterClimate(ClimateEntity):
             }
 
     async def _async_get_valve_states(self) -> dict[str, bool]:
-        """Get current states of all valves."""
+        """Get current states of all physical valves."""
         valve_states = {}
         for zone in self._zones:
-            valve_entity = zone[CONF_VALVE_SWITCH]
+            valve_entity = zone.get(CONF_VALVE_SWITCH)
+            if not valve_entity:
+                continue
+                
             state = self.hass.states.get(valve_entity)
             
             if state:
@@ -469,7 +521,7 @@ class MultizoneHeaterClimate(ClimateEntity):
     async def _async_turn_off_all_valves(self) -> None:
         """Turn off all valves except minimum required."""
         async with self._update_lock:
-            valve_entities = [zone[CONF_VALVE_SWITCH] for zone in self._zones]
+            valve_entities = [zone.get(CONF_VALVE_SWITCH) for zone in self._zones if zone.get(CONF_VALVE_SWITCH)]
             tasks = []
 
             # Determine which valves to keep open
