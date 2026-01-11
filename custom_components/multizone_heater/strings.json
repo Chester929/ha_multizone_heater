@@ -5,7 +5,7 @@
         "title": "Set up Multizone Heater",
         "description": "Configure the main climate entity and zone control settings. The main climate (boiler) temperature sensor in the corridor will be used for temperature display.",
         "data": {
-          "main_climate": "Main Climate Entity (required for temperature display)",
+          "main_climate": "Main Climate Entity (optional, but needed for temperature display)",
           "main_temp_sensor": "Main Temperature Sensor Override (optional, overrides main climate sensor)",
           "min_valves_open": "Minimum Valves Open",
           "compensation_factor": "Compensation Factor",
