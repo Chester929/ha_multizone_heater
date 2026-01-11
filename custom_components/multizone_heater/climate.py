@@ -39,6 +39,7 @@ from .const import (
     CONF_VALVE_SWITCH,
     CONF_ZONE_NAME,
     CONF_ZONES,
+    DEFAULT_HVAC_ACTION_DEADBAND,
     DEFAULT_MIN_VALVES_OPEN,
     DEFAULT_TARGET_TEMP_OFFSET,
     DEFAULT_TEMPERATURE_AGGREGATION,
@@ -272,9 +273,9 @@ class MultizoneHeaterClimate(ClimateEntity):
         if self._hvac_mode == HVACMode.OFF:
             self._hvac_action = HVACAction.OFF
         elif self._current_temperature is not None and self._target_temperature is not None:
-            if self._current_temperature < self._target_temperature - 0.5:
+            if self._current_temperature < self._target_temperature - DEFAULT_HVAC_ACTION_DEADBAND:
                 self._hvac_action = HVACAction.HEATING
-            elif self._current_temperature > self._target_temperature + 0.5:
+            elif self._current_temperature > self._target_temperature + DEFAULT_HVAC_ACTION_DEADBAND:
                 self._hvac_action = HVACAction.IDLE
             else:
                 # In deadband

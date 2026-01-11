@@ -15,7 +15,7 @@ High-performance Home Assistant integration for managing multizone heating syste
 
 Traditional blueprint-based automations can be slow and have limited optimization options. This Python integration leverages Home Assistant's native async capabilities for:
 
-- ⚡ **10x faster** valve response times
+- ⚡ **Significantly faster** valve response times
 - 🔄 **Parallel processing** of all valve operations
 - 📊 **Real-time updates** without polling delays
 - 💪 **Lower resource usage** than complex automations

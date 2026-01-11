@@ -16,6 +16,7 @@ CONF_MIN_VALVES_OPEN = "min_valves_open"
 DEFAULT_TARGET_TEMP_OFFSET = 0.5
 DEFAULT_TEMPERATURE_AGGREGATION = "average"
 DEFAULT_MIN_VALVES_OPEN = 1
+DEFAULT_HVAC_ACTION_DEADBAND = 0.5  # Temperature deadband for HVAC action determination
 
 # Temperature aggregation methods
 TEMP_AGG_AVERAGE = "average"
