@@ -5,9 +5,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import selector
 from homeassistant.helpers.selector import (
     EntitySelector,
     EntitySelectorConfig,
