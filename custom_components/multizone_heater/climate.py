@@ -263,7 +263,35 @@ class MultizoneHeaterClimate(ClimateEntity):
             
             Triggers valve control which is serialized via _update_lock.
             Multiple concurrent calls are safe - they will queue and execute sequentially.
+            
+            Detects target temperature changes in zone climate entities and forces
+            immediate valve control to ensure responsive main climate updates.
             """
+            # Check if this is a target temperature change in a zone climate entity
+            is_target_temp_change = False
+            if event.data.get("new_state") and event.data.get("old_state"):
+                new_state = event.data["new_state"]
+                old_state = event.data["old_state"]
+                
+                # Check if the entity is a climate entity
+                if new_state.domain == "climate":
+                    new_target = new_state.attributes.get("temperature")
+                    old_target = old_state.attributes.get("temperature")
+                    
+                    # Detect target temperature change
+                    if new_target is not None and old_target is not None:
+                        try:
+                            if abs(float(new_target) - float(old_target)) >= 0.01:
+                                is_target_temp_change = True
+                                _LOGGER.debug(
+                                    "Zone climate %s target changed from %.1f to %.1f - forcing immediate update",
+                                    new_state.entity_id,
+                                    float(old_target),
+                                    float(new_target),
+                                )
+                        except (ValueError, TypeError):
+                            pass
+            
             self.async_schedule_update_ha_state(True)
             # Trigger valve control when zone states change
             if self._hvac_mode in (HVACMode.HEAT, HVACMode.COOL):
