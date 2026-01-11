@@ -18,24 +18,39 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    CONF_ALL_SATISFIED_MODE,
+    CONF_COMPENSATION_FACTOR,
     CONF_FALLBACK_ZONES,
+    CONF_MAIN_CHANGE_THRESHOLD,
     CONF_MAIN_CLIMATE,
+    CONF_MAIN_MAX_TEMP,
+    CONF_MAIN_MIN_TEMP,
+    CONF_MAIN_TEMP_SENSOR,
     CONF_MIN_VALVES_OPEN,
+    CONF_PHYSICAL_CLOSE_ANTICIPATION,
     CONF_TARGET_TEMP_OFFSET,
     CONF_TARGET_TEMP_OFFSET_CLOSING,
     CONF_TEMPERATURE_AGGREGATION,
     CONF_TEMPERATURE_AGGREGATION_WEIGHT,
     CONF_TEMPERATURE_SENSOR,
     CONF_VALVE_SWITCH,
+    CONF_VALVE_TRANSITION_DELAY,
     CONF_VIRTUAL_SWITCH,
     CONF_ZONE_CLIMATE,
     CONF_ZONE_NAME,
     CONF_ZONES,
+    DEFAULT_ALL_SATISFIED_MODE,
+    DEFAULT_COMPENSATION_FACTOR,
+    DEFAULT_MAIN_CHANGE_THRESHOLD,
+    DEFAULT_MAIN_MAX_TEMP,
+    DEFAULT_MAIN_MIN_TEMP,
     DEFAULT_MIN_VALVES_OPEN,
+    DEFAULT_PHYSICAL_CLOSE_ANTICIPATION,
     DEFAULT_TARGET_TEMP_OFFSET,
     DEFAULT_TARGET_TEMP_OFFSET_CLOSING,
     DEFAULT_TEMPERATURE_AGGREGATION,
     DEFAULT_TEMPERATURE_AGGREGATION_WEIGHT,
+    DEFAULT_VALVE_TRANSITION_DELAY,
     DOMAIN,
     TEMPERATURE_AGGREGATION_OPTIONS,
 )
@@ -52,10 +67,18 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self._zones = []
         self._main_climate = None
+        self._main_temp_sensor = None
         self._temperature_aggregation = DEFAULT_TEMPERATURE_AGGREGATION
         self._temperature_aggregation_weight = DEFAULT_TEMPERATURE_AGGREGATION_WEIGHT
         self._min_valves_open = DEFAULT_MIN_VALVES_OPEN
         self._fallback_zones = []
+        self._compensation_factor = DEFAULT_COMPENSATION_FACTOR
+        self._valve_transition_delay = DEFAULT_VALVE_TRANSITION_DELAY
+        self._main_min_temp = DEFAULT_MAIN_MIN_TEMP
+        self._main_max_temp = DEFAULT_MAIN_MAX_TEMP
+        self._main_change_threshold = DEFAULT_MAIN_CHANGE_THRESHOLD
+        self._physical_close_anticipation = DEFAULT_PHYSICAL_CLOSE_ANTICIPATION
+        self._all_satisfied_mode = DEFAULT_ALL_SATISFIED_MODE
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -65,6 +88,7 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             self._main_climate = user_input.get(CONF_MAIN_CLIMATE)
+            self._main_temp_sensor = user_input.get(CONF_MAIN_TEMP_SENSOR)
             self._temperature_aggregation = user_input.get(
                 CONF_TEMPERATURE_AGGREGATION, DEFAULT_TEMPERATURE_AGGREGATION
             )
@@ -74,6 +98,27 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._min_valves_open = user_input.get(
                 CONF_MIN_VALVES_OPEN, DEFAULT_MIN_VALVES_OPEN
             )
+            self._compensation_factor = user_input.get(
+                CONF_COMPENSATION_FACTOR, DEFAULT_COMPENSATION_FACTOR
+            )
+            self._valve_transition_delay = user_input.get(
+                CONF_VALVE_TRANSITION_DELAY, DEFAULT_VALVE_TRANSITION_DELAY
+            )
+            self._main_min_temp = user_input.get(
+                CONF_MAIN_MIN_TEMP, DEFAULT_MAIN_MIN_TEMP
+            )
+            self._main_max_temp = user_input.get(
+                CONF_MAIN_MAX_TEMP, DEFAULT_MAIN_MAX_TEMP
+            )
+            self._main_change_threshold = user_input.get(
+                CONF_MAIN_CHANGE_THRESHOLD, DEFAULT_MAIN_CHANGE_THRESHOLD
+            )
+            self._physical_close_anticipation = user_input.get(
+                CONF_PHYSICAL_CLOSE_ANTICIPATION, DEFAULT_PHYSICAL_CLOSE_ANTICIPATION
+            )
+            self._all_satisfied_mode = user_input.get(
+                CONF_ALL_SATISFIED_MODE, DEFAULT_ALL_SATISFIED_MODE
+            )
 
             return await self.async_step_add_zone()
 
@@ -81,6 +126,9 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 vol.Optional(CONF_MAIN_CLIMATE): EntitySelector(
                     EntitySelectorConfig(domain="climate")
+                ),
+                vol.Optional(CONF_MAIN_TEMP_SENSOR): EntitySelector(
+                    EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(
                     CONF_TEMPERATURE_AGGREGATION, default=DEFAULT_TEMPERATURE_AGGREGATION
@@ -102,6 +150,55 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): NumberSelector(
                     NumberSelectorConfig(
                         min=0, max=10, step=1, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_COMPENSATION_FACTOR, default=DEFAULT_COMPENSATION_FACTOR
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0.0, max=1.0, step=0.01, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_VALVE_TRANSITION_DELAY, default=DEFAULT_VALVE_TRANSITION_DELAY
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=5, max=300, step=1, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_MAIN_MIN_TEMP, default=DEFAULT_MAIN_MIN_TEMP
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=5.0, max=25.0, step=0.5, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_MAIN_MAX_TEMP, default=DEFAULT_MAIN_MAX_TEMP
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=20.0, max=40.0, step=0.5, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_MAIN_CHANGE_THRESHOLD, default=DEFAULT_MAIN_CHANGE_THRESHOLD
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0.0, max=1.0, step=0.05, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_PHYSICAL_CLOSE_ANTICIPATION, default=DEFAULT_PHYSICAL_CLOSE_ANTICIPATION
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0.0, max=2.0, step=0.1, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_ALL_SATISFIED_MODE, default=DEFAULT_ALL_SATISFIED_MODE
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0, max=100, step=1, mode=NumberSelectorMode.SLIDER
                     )
                 ),
             }
@@ -234,11 +331,19 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     title=f"Multizone Heater ({len(self._zones)} zones)",
                     data={
                         CONF_MAIN_CLIMATE: self._main_climate,
+                        CONF_MAIN_TEMP_SENSOR: self._main_temp_sensor,
                         CONF_TEMPERATURE_AGGREGATION: self._temperature_aggregation,
                         CONF_TEMPERATURE_AGGREGATION_WEIGHT: self._temperature_aggregation_weight,
                         CONF_MIN_VALVES_OPEN: self._min_valves_open,
                         CONF_FALLBACK_ZONES: self._fallback_zones,
                         CONF_ZONES: self._zones,
+                        CONF_COMPENSATION_FACTOR: self._compensation_factor,
+                        CONF_VALVE_TRANSITION_DELAY: self._valve_transition_delay,
+                        CONF_MAIN_MIN_TEMP: self._main_min_temp,
+                        CONF_MAIN_MAX_TEMP: self._main_max_temp,
+                        CONF_MAIN_CHANGE_THRESHOLD: self._main_change_threshold,
+                        CONF_PHYSICAL_CLOSE_ANTICIPATION: self._physical_close_anticipation,
+                        CONF_ALL_SATISFIED_MODE: self._all_satisfied_mode,
                     },
                 )
 
@@ -356,6 +461,76 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ): NumberSelector(
                     NumberSelectorConfig(
                         min=0, max=10, step=1, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_COMPENSATION_FACTOR,
+                    default=self.config_entry.data.get(
+                        CONF_COMPENSATION_FACTOR, DEFAULT_COMPENSATION_FACTOR
+                    ),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0.0, max=1.0, step=0.01, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_VALVE_TRANSITION_DELAY,
+                    default=self.config_entry.data.get(
+                        CONF_VALVE_TRANSITION_DELAY, DEFAULT_VALVE_TRANSITION_DELAY
+                    ),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=5, max=300, step=1, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_MAIN_MIN_TEMP,
+                    default=self.config_entry.data.get(
+                        CONF_MAIN_MIN_TEMP, DEFAULT_MAIN_MIN_TEMP
+                    ),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=5.0, max=25.0, step=0.5, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_MAIN_MAX_TEMP,
+                    default=self.config_entry.data.get(
+                        CONF_MAIN_MAX_TEMP, DEFAULT_MAIN_MAX_TEMP
+                    ),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=20.0, max=40.0, step=0.5, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_MAIN_CHANGE_THRESHOLD,
+                    default=self.config_entry.data.get(
+                        CONF_MAIN_CHANGE_THRESHOLD, DEFAULT_MAIN_CHANGE_THRESHOLD
+                    ),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0.0, max=1.0, step=0.05, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_PHYSICAL_CLOSE_ANTICIPATION,
+                    default=self.config_entry.data.get(
+                        CONF_PHYSICAL_CLOSE_ANTICIPATION, DEFAULT_PHYSICAL_CLOSE_ANTICIPATION
+                    ),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0.0, max=2.0, step=0.1, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_ALL_SATISFIED_MODE,
+                    default=self.config_entry.data.get(
+                        CONF_ALL_SATISFIED_MODE, DEFAULT_ALL_SATISFIED_MODE
+                    ),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0, max=100, step=1, mode=NumberSelectorMode.SLIDER
                     )
                 ),
             }
