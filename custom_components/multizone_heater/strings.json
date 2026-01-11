@@ -3,12 +3,18 @@
     "step": {
       "user": {
         "title": "Set up Multizone Heater",
-        "description": "Configure the main climate entity and aggregation settings.",
+        "description": "Configure the main climate entity and zone control settings. The main climate (boiler) temperature sensor in the corridor will be used for temperature display.",
         "data": {
-          "main_climate": "Main Climate Entity (optional)",
-          "temperature_aggregation": "Temperature Aggregation Method",
-          "temperature_aggregation_weight": "Temperature Aggregation Weight (0%=min, 50%=avg, 100%=max)",
-          "min_valves_open": "Minimum Valves Open"
+          "main_climate": "Main Climate Entity (optional, but needed for temperature display)",
+          "main_temp_sensor": "Main Temperature Sensor Override (optional, overrides main climate sensor)",
+          "min_valves_open": "Minimum Valves Open",
+          "compensation_factor": "Compensation Factor",
+          "valve_transition_delay": "Valve Transition Delay (seconds)",
+          "main_min_temp": "Main Minimum Temperature (°C)",
+          "main_max_temp": "Main Maximum Temperature (°C)",
+          "main_change_threshold": "Main Change Threshold (°C)",
+          "physical_close_anticipation": "Physical Close Anticipation (°C)",
+          "all_satisfied_mode": "Main Target When All Zones Satisfied (0%=lowest target, 50%=average target, 100%=highest target)"
         }
       },
       "add_zone": {
@@ -49,9 +55,14 @@
         "title": "Multizone Heater Options",
         "description": "Configure options for the multizone heater.",
         "data": {
-          "temperature_aggregation": "Temperature Aggregation Method",
-          "temperature_aggregation_weight": "Temperature Aggregation Weight (0%=min, 50%=avg, 100%=max)",
-          "min_valves_open": "Minimum Valves Open"
+          "min_valves_open": "Minimum Valves Open",
+          "compensation_factor": "Compensation Factor",
+          "valve_transition_delay": "Valve Transition Delay (seconds)",
+          "main_min_temp": "Main Minimum Temperature (°C)",
+          "main_max_temp": "Main Maximum Temperature (°C)",
+          "main_change_threshold": "Main Change Threshold (°C)",
+          "physical_close_anticipation": "Physical Close Anticipation (°C)",
+          "all_satisfied_mode": "Main Target When All Zones Satisfied (0%=lowest target, 50%=average target, 100%=highest target)"
         }
       }
     }

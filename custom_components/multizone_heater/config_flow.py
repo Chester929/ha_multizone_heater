@@ -30,8 +30,6 @@ from .const import (
     CONF_PHYSICAL_CLOSE_ANTICIPATION,
     CONF_TARGET_TEMP_OFFSET,
     CONF_TARGET_TEMP_OFFSET_CLOSING,
-    CONF_TEMPERATURE_AGGREGATION,
-    CONF_TEMPERATURE_AGGREGATION_WEIGHT,
     CONF_TEMPERATURE_SENSOR,
     CONF_VALVE_SWITCH,
     CONF_VALVE_TRANSITION_DELAY,
@@ -48,11 +46,8 @@ from .const import (
     DEFAULT_PHYSICAL_CLOSE_ANTICIPATION,
     DEFAULT_TARGET_TEMP_OFFSET,
     DEFAULT_TARGET_TEMP_OFFSET_CLOSING,
-    DEFAULT_TEMPERATURE_AGGREGATION,
-    DEFAULT_TEMPERATURE_AGGREGATION_WEIGHT,
     DEFAULT_VALVE_TRANSITION_DELAY,
     DOMAIN,
-    TEMPERATURE_AGGREGATION_OPTIONS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -68,8 +63,6 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._zones = []
         self._main_climate = None
         self._main_temp_sensor = None
-        self._temperature_aggregation = DEFAULT_TEMPERATURE_AGGREGATION
-        self._temperature_aggregation_weight = DEFAULT_TEMPERATURE_AGGREGATION_WEIGHT
         self._min_valves_open = DEFAULT_MIN_VALVES_OPEN
         self._fallback_zones = []
         self._compensation_factor = DEFAULT_COMPENSATION_FACTOR
@@ -89,12 +82,6 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._main_climate = user_input.get(CONF_MAIN_CLIMATE)
             self._main_temp_sensor = user_input.get(CONF_MAIN_TEMP_SENSOR)
-            self._temperature_aggregation = user_input.get(
-                CONF_TEMPERATURE_AGGREGATION, DEFAULT_TEMPERATURE_AGGREGATION
-            )
-            self._temperature_aggregation_weight = user_input.get(
-                CONF_TEMPERATURE_AGGREGATION_WEIGHT, DEFAULT_TEMPERATURE_AGGREGATION_WEIGHT
-            )
             self._min_valves_open = user_input.get(
                 CONF_MIN_VALVES_OPEN, DEFAULT_MIN_VALVES_OPEN
             )
@@ -136,21 +123,6 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Optional(CONF_MAIN_TEMP_SENSOR): EntitySelector(
                     EntitySelectorConfig(domain="sensor")
-                ),
-                vol.Optional(
-                    CONF_TEMPERATURE_AGGREGATION, default=DEFAULT_TEMPERATURE_AGGREGATION
-                ): SelectSelector(
-                    SelectSelectorConfig(
-                        options=TEMPERATURE_AGGREGATION_OPTIONS,
-                        mode=SelectSelectorMode.DROPDOWN,
-                    )
-                ),
-                vol.Optional(
-                    CONF_TEMPERATURE_AGGREGATION_WEIGHT, default=DEFAULT_TEMPERATURE_AGGREGATION_WEIGHT
-                ): NumberSelector(
-                    NumberSelectorConfig(
-                        min=0, max=100, step=1, mode=NumberSelectorMode.SLIDER
-                    )
                 ),
                 vol.Optional(
                     CONF_MIN_VALVES_OPEN, default=DEFAULT_MIN_VALVES_OPEN
@@ -339,8 +311,6 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     data={
                         CONF_MAIN_CLIMATE: self._main_climate,
                         CONF_MAIN_TEMP_SENSOR: self._main_temp_sensor,
-                        CONF_TEMPERATURE_AGGREGATION: self._temperature_aggregation,
-                        CONF_TEMPERATURE_AGGREGATION_WEIGHT: self._temperature_aggregation_weight,
                         CONF_MIN_VALVES_OPEN: self._min_valves_open,
                         CONF_FALLBACK_ZONES: self._fallback_zones,
                         CONF_ZONES: self._zones,
@@ -447,27 +417,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         data_schema = vol.Schema(
             {
-                vol.Optional(
-                    CONF_TEMPERATURE_AGGREGATION,
-                    default=self.config_entry.data.get(
-                        CONF_TEMPERATURE_AGGREGATION, DEFAULT_TEMPERATURE_AGGREGATION
-                    ),
-                ): SelectSelector(
-                    SelectSelectorConfig(
-                        options=TEMPERATURE_AGGREGATION_OPTIONS,
-                        mode=SelectSelectorMode.DROPDOWN,
-                    )
-                ),
-                vol.Optional(
-                    CONF_TEMPERATURE_AGGREGATION_WEIGHT,
-                    default=self.config_entry.data.get(
-                        CONF_TEMPERATURE_AGGREGATION_WEIGHT, DEFAULT_TEMPERATURE_AGGREGATION_WEIGHT
-                    ),
-                ): NumberSelector(
-                    NumberSelectorConfig(
-                        min=0, max=100, step=1, mode=NumberSelectorMode.SLIDER
-                    )
-                ),
                 vol.Optional(
                     CONF_MIN_VALVES_OPEN,
                     default=self.config_entry.data.get(
