@@ -264,11 +264,11 @@ class MultizoneHeaterClimate(ClimateEntity):
             Triggers valve control which is serialized via _update_lock.
             Multiple concurrent calls are safe - they will queue and execute sequentially.
             
-            Detects target temperature changes in zone climate entities and forces
-            immediate valve control to ensure responsive main climate updates.
+            Detects target temperature changes in zone climate entities and logs them
+            for debugging purposes to ensure responsive main climate updates.
             """
             # Check if this is a target temperature change in a zone climate entity
-            is_target_temp_change = False
+            # This provides useful debug logging for troubleshooting timing issues
             if event.data.get("new_state") and event.data.get("old_state"):
                 new_state = event.data["new_state"]
                 old_state = event.data["old_state"]
@@ -278,13 +278,12 @@ class MultizoneHeaterClimate(ClimateEntity):
                     new_target = new_state.attributes.get("temperature")
                     old_target = old_state.attributes.get("temperature")
                     
-                    # Detect target temperature change
+                    # Detect and log target temperature changes
                     if new_target is not None and old_target is not None:
                         try:
                             if abs(float(new_target) - float(old_target)) >= 0.01:
-                                is_target_temp_change = True
                                 _LOGGER.debug(
-                                    "Zone climate %s target changed from %.1f to %.1f - forcing immediate update",
+                                    "Zone climate %s target changed from %.1f to %.1f - triggering valve control",
                                     new_state.entity_id,
                                     float(old_target),
                                     float(new_target),
