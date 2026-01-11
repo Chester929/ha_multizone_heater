@@ -63,6 +63,7 @@ from .const import (
     DEFAULT_TEMPERATURE_AGGREGATION,
     DEFAULT_TEMPERATURE_AGGREGATION_WEIGHT,
     DEFAULT_VALVE_TRANSITION_DELAY,
+    DEFAULT_ZONE_TARGET_CHANGE_DELAY,
     DOMAIN,
     TEMP_AGG_AVERAGE,
     TEMP_AGG_MAX,
@@ -194,6 +195,9 @@ class MultizoneHeaterClimate(ClimateEntity):
         self._valve_no_reopen_until = {}
         # Track last main climate target to avoid unnecessary updates
         self._last_main_target = None
+        # Track pending zone target change for debouncing
+        self._zone_target_change_timer = None
+        self._pending_zone_target_update = False
 
         # Use Home Assistant's configured temperature unit
         self._attr_temperature_unit = hass.config.units.temperature_unit
@@ -264,11 +268,11 @@ class MultizoneHeaterClimate(ClimateEntity):
             Triggers valve control which is serialized via _update_lock.
             Multiple concurrent calls are safe - they will queue and execute sequentially.
             
-            Detects target temperature changes in zone climate entities and logs them
-            for debugging purposes to ensure responsive main climate updates.
+            Detects target temperature changes in zone climate entities and debounces them
+            to avoid updating main climate for every slider adjustment.
             """
             # Check if this is a target temperature change in a zone climate entity
-            # This provides useful debug logging for troubleshooting timing issues
+            is_zone_target_change = False
             if event.data.get("new_state") and event.data.get("old_state"):
                 new_state = event.data["new_state"]
                 old_state = event.data["old_state"]
@@ -278,12 +282,13 @@ class MultizoneHeaterClimate(ClimateEntity):
                     new_target = new_state.attributes.get("temperature")
                     old_target = old_state.attributes.get("temperature")
                     
-                    # Detect and log target temperature changes
+                    # Detect target temperature changes (not current temperature)
                     if new_target is not None and old_target is not None:
                         try:
                             if abs(float(new_target) - float(old_target)) >= 0.01:
+                                is_zone_target_change = True
                                 _LOGGER.debug(
-                                    "Zone climate %s target changed from %.1f to %.1f - triggering valve control",
+                                    "Zone climate %s target changed from %.1f to %.1f - debouncing update",
                                     new_state.entity_id,
                                     float(old_target),
                                     float(new_target),
@@ -292,8 +297,35 @@ class MultizoneHeaterClimate(ClimateEntity):
                             pass
             
             self.async_schedule_update_ha_state(True)
-            # Trigger valve control when zone states change
-            if self._hvac_mode in (HVACMode.HEAT, HVACMode.COOL):
+            
+            # Handle zone target changes with debouncing
+            if is_zone_target_change and self._hvac_mode in (HVACMode.HEAT, HVACMode.COOL):
+                # Cancel existing timer if present
+                if self._zone_target_change_timer:
+                    self._zone_target_change_timer.cancel()
+                
+                # Mark that we have a pending update
+                self._pending_zone_target_update = True
+                
+                # Schedule a delayed valve control update
+                async def delayed_valve_control():
+                    """Execute valve control after debounce delay."""
+                    self._pending_zone_target_update = False
+                    self._zone_target_change_timer = None
+                    _LOGGER.debug("Debounce delay complete - executing valve control")
+                    await self._async_control_valves()
+                
+                self._zone_target_change_timer = self.hass.async_create_task(
+                    asyncio.sleep(DEFAULT_ZONE_TARGET_CHANGE_DELAY)
+                )
+                
+                # Chain the valve control after the sleep
+                self._zone_target_change_timer.add_done_callback(
+                    lambda _: self.hass.async_create_task(delayed_valve_control())
+                )
+            elif self._hvac_mode in (HVACMode.HEAT, HVACMode.COOL):
+                # For non-target changes (temperature sensor updates, virtual switch, etc.)
+                # trigger valve control immediately without debouncing
                 self.hass.async_create_task(self._async_control_valves())
 
         for entity in tracked_entities:

@@ -40,6 +40,7 @@ DEFAULT_MAIN_CHANGE_THRESHOLD = 0.1  # Minimum change to update main climate
 DEFAULT_PHYSICAL_CLOSE_ANTICIPATION = 0.6  # Early close offset for physical valves
 DEFAULT_ALL_SATISFIED_MODE = 50  # 0-100%, where 0=min, 50=avg, 100=max
 DEFAULT_RECONCILIATION_INTERVAL = 5  # Seconds between periodic valve reconciliation checks
+DEFAULT_ZONE_TARGET_CHANGE_DELAY = 5  # Seconds to wait after zone target change before updating main climate
 
 # Temperature aggregation methods
 TEMP_AGG_AVERAGE = "average"
