@@ -440,35 +440,7 @@ class MultizoneHeaterClimate(ClimateEntity):
         # Calculate aggregated current temperature
         temperatures = []
         for zone in self._zones:
-            # Try to get temperature from zone climate entity first, then sensor
-            temp = None
-            
-            if zone.get(CONF_ZONE_CLIMATE):
-                climate_state = self.hass.states.get(zone[CONF_ZONE_CLIMATE])
-                if climate_state and climate_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                    temp_attr = climate_state.attributes.get("current_temperature")
-                    if temp_attr is not None:
-                        try:
-                            temp = float(temp_attr)
-                        except (ValueError, TypeError):
-                            _LOGGER.warning(
-                                "Unable to parse temperature from climate %s",
-                                zone[CONF_ZONE_CLIMATE],
-                            )
-            
-            # If no temp from climate entity, try sensor override
-            if temp is None and zone.get(CONF_TEMPERATURE_SENSOR):
-                sensor_state = self.hass.states.get(zone[CONF_TEMPERATURE_SENSOR])
-                if sensor_state and sensor_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                    try:
-                        temp = float(sensor_state.state)
-                    except (ValueError, TypeError):
-                        _LOGGER.warning(
-                            "Unable to parse temperature from %s: %s",
-                            zone[CONF_TEMPERATURE_SENSOR],
-                            sensor_state.state,
-                        )
-            
+            temp = self._get_zone_temperature(zone)
             if temp is not None:
                 temperatures.append(temp)
 
@@ -545,25 +517,7 @@ class MultizoneHeaterClimate(ClimateEntity):
             
             for zone in self._zones:
                 # Get temperature from zone climate or sensor
-                current_temp = None
-                if zone.get(CONF_ZONE_CLIMATE):
-                    climate_state = self.hass.states.get(zone[CONF_ZONE_CLIMATE])
-                    if climate_state and climate_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                        temp_attr = climate_state.attributes.get("current_temperature")
-                        if temp_attr is not None:
-                            try:
-                                current_temp = float(temp_attr)
-                            except (ValueError, TypeError):
-                                pass
-                
-                if current_temp is None and zone.get(CONF_TEMPERATURE_SENSOR):
-                    sensor_state = self.hass.states.get(zone[CONF_TEMPERATURE_SENSOR])
-                    if sensor_state and sensor_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                        try:
-                            current_temp = float(sensor_state.state)
-                        except (ValueError, TypeError):
-                            pass
-
+                current_temp = self._get_zone_temperature(zone)
                 if current_temp is None:
                     continue
 
@@ -579,19 +533,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                 target_offset_closing = zone.get(CONF_TARGET_TEMP_OFFSET_CLOSING, DEFAULT_TARGET_TEMP_OFFSET_CLOSING)
 
                 # Get zone target temperature from zone climate entity if available
-                zone_target = self._target_temperature  # Default fallback
-                if zone.get(CONF_ZONE_CLIMATE):
-                    climate_state = self.hass.states.get(zone[CONF_ZONE_CLIMATE])
-                    if climate_state and climate_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                        target_attr = climate_state.attributes.get("temperature")
-                        if target_attr is not None:
-                            try:
-                                zone_target = float(target_attr)
-                            except (ValueError, TypeError):
-                                _LOGGER.warning(
-                                    "Unable to parse target temperature from climate %s, using default",
-                                    zone[CONF_ZONE_CLIMATE],
-                                )
+                zone_target = self._get_zone_target_temperature(zone)
                 zone_targets.append(zone_target)
 
                 # Get current valve state (or virtual switch state)
@@ -837,6 +779,71 @@ class MultizoneHeaterClimate(ClimateEntity):
                 
                 _LOGGER.debug("Phase 2: Turning OFF %d valves: %s", len(valves_actually_turning_off), valves_actually_turning_off)
                 await asyncio.gather(*tasks, return_exceptions=True)
+
+    def _get_zone_temperature(self, zone: dict[str, Any]) -> float | None:
+        """Get current temperature from zone climate entity or sensor.
+        
+        Args:
+            zone: Zone configuration dict
+            
+        Returns:
+            Current temperature or None if unavailable
+        """
+        current_temp = None
+        
+        # Try zone climate entity first
+        if zone.get(CONF_ZONE_CLIMATE):
+            climate_state = self.hass.states.get(zone[CONF_ZONE_CLIMATE])
+            if climate_state and climate_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                temp_attr = climate_state.attributes.get("current_temperature")
+                if temp_attr is not None:
+                    try:
+                        return float(temp_attr)
+                    except (ValueError, TypeError):
+                        _LOGGER.warning(
+                            "Unable to parse current temperature from climate %s",
+                            zone[CONF_ZONE_CLIMATE],
+                        )
+        
+        # Fall back to temperature sensor
+        if zone.get(CONF_TEMPERATURE_SENSOR):
+            sensor_state = self.hass.states.get(zone[CONF_TEMPERATURE_SENSOR])
+            if sensor_state and sensor_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                try:
+                    return float(sensor_state.state)
+                except (ValueError, TypeError):
+                    _LOGGER.warning(
+                        "Unable to parse temperature from sensor %s",
+                        zone[CONF_TEMPERATURE_SENSOR],
+                    )
+        
+        return None
+
+    def _get_zone_target_temperature(self, zone: dict[str, Any]) -> float:
+        """Get target temperature from zone climate entity or use default.
+        
+        Args:
+            zone: Zone configuration dict
+            
+        Returns:
+            Target temperature (from zone climate or multizone heater default)
+        """
+        # Try to get from zone climate entity
+        if zone.get(CONF_ZONE_CLIMATE):
+            climate_state = self.hass.states.get(zone[CONF_ZONE_CLIMATE])
+            if climate_state and climate_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                target_attr = climate_state.attributes.get("temperature")
+                if target_attr is not None:
+                    try:
+                        return float(target_attr)
+                    except (ValueError, TypeError):
+                        _LOGGER.warning(
+                            "Unable to parse target temperature from climate %s, using default",
+                            zone[CONF_ZONE_CLIMATE],
+                        )
+        
+        # Fall back to multizone heater target
+        return self._target_temperature
 
     async def _async_get_valve_states(self) -> dict[str, bool]:
         """Get current states of all physical valves."""
