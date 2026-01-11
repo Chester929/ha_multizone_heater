@@ -220,12 +220,20 @@ Total Time: Max of individual actions (typically 1/Nth the time)
 - `hvac_modes` - Available modes (dynamically set based on main climate capabilities)
 - `_supports_cooling` - Boolean flag indicating cooling support
 - `_fallback_zone_names` - List of fallback zone names for pump safety
+- `_compensation_factor` - Corridor compensation factor for main climate (default: 0.66)
+- `_valve_transition_delay` - Delay between opening and closing valves (default: 60s)
+- `_main_min_temp` / `_main_max_temp` - Temperature range for main climate (18-30°C)
+- `_main_change_threshold` - Minimum change to update main climate (default: 0.1°C)
+- `_physical_close_anticipation` - Early close offset to prevent overshoot (default: 0.6°C)
+- `_all_satisfied_mode` - Slider for main target when all zones satisfied (default: 50)
+- `_valve_no_reopen_until` - Dict tracking reopen suppression timestamps per valve
+- `_last_main_target` - Last main climate target to avoid unnecessary updates
 
 **Key Methods:**
 - `async_set_temperature(temperature)` - Set target temperature and trigger valve control
 - `async_set_hvac_mode(mode)` - Change HVAC mode (HEAT/COOL/OFF) and coordinate with main climate
 - `async_update()` - Calculate aggregated temperature and update HVAC action
-- `_async_control_valves()` - Main valve control logic for heating mode with hysteresis
+- `_async_control_valves()` - Main valve control logic with compensation and two-phase operation
 - `_async_control_valves_for_cooling()` - Valve control for cooling mode (fallback zones only)
 - `_async_get_valve_states()` - Query current state of all physical valves
 - `_async_turn_off_all_valves()` - Turn off valves except minimum required
@@ -248,7 +256,7 @@ else:
         temp = avg + (max - avg) * ((weight - 50) / 50)
 ```
 
-**Valve Control Logic (Heating Mode):**
+**Valve Control Logic (Heating Mode with Compensation):**
 ```python
 for zone in zones:
     # Get temperature from climate entity or sensor
@@ -258,34 +266,73 @@ for zone in zones:
     check_entity = zone.virtual_switch or zone.valve
     is_open = state(check_entity) == ON
     
-    # Hysteresis logic
+    # Calculate compensation-based desired main temperature
+    deficit = zone_target - current_temp
+    zone_desired_main = zone_target + compensation_factor * deficit
+    
+    # Hysteresis logic with physical close anticipation
     if is_open:
-        should_open = current_temp < (target + closing_offset)
+        # Early close to prevent overshoot
+        physical_close_threshold = (target + closing_offset) - physical_close_anticipation
+        should_open = current_temp < physical_close_threshold
+        
+        # Set reopen suppression if closing early
+        if not should_open and current_temp < (target + closing_offset):
+            valve_no_reopen_until[valve] = now + valve_transition_delay
     else:
         should_open = current_temp < (target - opening_offset)
+        
+        # Check reopen suppression
+        if should_open and valve in valve_no_reopen_until:
+            if now < valve_no_reopen_until[valve]:
+                should_open = False  # Suppressed
     
     if should_open:
         zones_needing_heat.append(zone.valve)
+        per_zone_desired_main.append(zone_desired_main)
+
+# Calculate main climate target
+if zones_needing_heat:
+    desired_main = max(per_zone_desired_main)  # For heating
+else:
+    # All satisfied - use slider interpolation
+    desired_main = interpolate(min_target, avg_target, max_target, all_satisfied_mode)
+
+# Update main climate if change exceeds threshold
+if abs(desired_main - last_main_target) >= main_change_threshold:
+    set_main_climate_temperature(round(desired_main, 1))
+
+# Two-phase valve operation
+# Phase 1: Open valves
+for valve in valves_to_turn_on:
+    turn_on(valve)
+
+# Wait for transition
+sleep(valve_transition_delay)
+
+# Phase 2: Close valves
+for valve in valves_to_turn_off:
+    turn_off(valve)
 ```
 
 **Valve Control Logic (Cooling Mode):**
 ```python
 async def _async_control_valves_for_cooling():
-    # Get fallback zone valve entities
-    fallback_valves = [zone.valve for zone in zones 
-                       if zone.name in fallback_zone_names]
+    # For cooling, compensation is inverted
+    for zone in zones:
+        deficit = zone_target - current_temp
+        zone_desired_main = zone_target - compensation_factor * (-deficit)
+        
+        if should_open:
+            per_zone_desired_main.append(zone_desired_main)
     
-    # Open only fallback valves
-    for valve in fallback_valves:
-        await turn_on(valve)
+    # Use minimum for cooling (inverse of heating)
+    if zones_needing_cool:
+        desired_main = min(per_zone_desired_main)
     
-    # Close all non-fallback valves
-    for valve in all_valves:
-        if valve not in fallback_valves:
-            await turn_off(valve)
+    # Update main climate and control valves
+    ...
 ```
-- `hvac_mode` - Current mode (HEAT/OFF)
-- `hvac_action` - Current action (HEATING/IDLE/OFF)
 
 **Async Methods:**
 - `async_set_temperature()` - Sets target and triggers valve control
