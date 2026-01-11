@@ -125,6 +125,12 @@ class MultizoneHeaterClimate(ClimateEntity):
         # Convert to int to handle cases where it may have been stored as a float
         try:
             self._min_valves_open = int(min_valves_open)
+            _LOGGER.debug(
+                "Initialized min_valves_open: %s (type: %s, original: %s)",
+                self._min_valves_open,
+                type(self._min_valves_open).__name__,
+                min_valves_open,
+            )
         except (ValueError, TypeError):
             _LOGGER.warning(
                 "Invalid min_valves_open value %s, using default %s",
@@ -521,10 +527,22 @@ class MultizoneHeaterClimate(ClimateEntity):
                 # Keep some valves open even if not needed
                 available_valves = list(valves_to_turn_off)
                 needed = self._min_valves_open - len(valves_to_turn_on)
+                _LOGGER.debug(
+                    "Ensuring minimum valves open: current=%s, minimum=%s, needed=%s (type: %s), available=%s",
+                    len(valves_to_turn_on),
+                    self._min_valves_open,
+                    needed,
+                    type(needed).__name__,
+                    len(available_valves),
+                )
                 for i in range(min(needed, len(available_valves))):
                     valve = available_valves[i]
                     valves_to_turn_on.add(valve)
                     valves_to_turn_off.discard(valve)
+                    _LOGGER.debug(
+                        "Added fallback valve %s to maintain minimum open count",
+                        valve,
+                    )
 
             # Turn on valves asynchronously
             for valve_entity in valves_to_turn_on:
