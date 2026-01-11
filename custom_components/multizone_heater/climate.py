@@ -122,7 +122,16 @@ class MultizoneHeaterClimate(ClimateEntity):
         self._temperature_aggregation = temperature_aggregation
         self._temperature_aggregation_weight = temperature_aggregation_weight
         # Ensure min_valves_open is always an integer to prevent TypeError in range()
-        self._min_valves_open = int(min_valves_open)
+        # Convert to int to handle cases where it may have been stored as a float
+        try:
+            self._min_valves_open = int(min_valves_open)
+        except (ValueError, TypeError):
+            _LOGGER.warning(
+                "Invalid min_valves_open value %s, using default %s",
+                min_valves_open,
+                DEFAULT_MIN_VALVES_OPEN,
+            )
+            self._min_valves_open = DEFAULT_MIN_VALVES_OPEN
         self._fallback_zone_names = fallback_zones
 
         # Use Home Assistant's configured temperature unit
