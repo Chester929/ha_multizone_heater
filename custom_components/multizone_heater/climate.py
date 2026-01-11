@@ -81,12 +81,14 @@ class MultizoneHeaterClimate(ClimateEntity):
 
     _attr_has_entity_name = True
     _attr_name = None
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE
         | ClimateEntityFeature.TURN_OFF
         | ClimateEntityFeature.TURN_ON
     )
+    _attr_min_temp = 5.0
+    _attr_max_temp = 35.0
+    _attr_target_temperature_step = 0.5
 
     def __init__(
         self,
@@ -105,6 +107,9 @@ class MultizoneHeaterClimate(ClimateEntity):
         self._temperature_aggregation = temperature_aggregation
         self._min_valves_open = min_valves_open
 
+        # Use Home Assistant's configured temperature unit
+        self._attr_temperature_unit = hass.config.units.temperature_unit
+
         self._attr_unique_id = f"{config_entry.entry_id}_climate"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, config_entry.entry_id)},
@@ -120,7 +125,6 @@ class MultizoneHeaterClimate(ClimateEntity):
         self._attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
 
         self._update_lock = asyncio.Lock()
-        self._last_valve_states = {}
 
     async def async_added_to_hass(self) -> None:
         """Run when entity about to be added to hass."""
@@ -185,15 +189,22 @@ class MultizoneHeaterClimate(ClimateEntity):
 
         # If main climate is configured, update its target temperature
         if self._main_climate_entity:
-            await self.hass.services.async_call(
-                "climate",
-                "set_temperature",
-                {
-                    "entity_id": self._main_climate_entity,
-                    ATTR_TEMPERATURE: temperature,
-                },
-                blocking=True,
-            )
+            try:
+                await self.hass.services.async_call(
+                    "climate",
+                    "set_temperature",
+                    {
+                        "entity_id": self._main_climate_entity,
+                        ATTR_TEMPERATURE: temperature,
+                    },
+                    blocking=True,
+                )
+            except Exception as err:
+                _LOGGER.error(
+                    "Failed to set temperature on main climate %s: %s",
+                    self._main_climate_entity,
+                    err,
+                )
 
         await self._async_control_valves()
         self.async_write_ha_state()
@@ -208,27 +219,41 @@ class MultizoneHeaterClimate(ClimateEntity):
             
             # Turn off main climate if configured
             if self._main_climate_entity:
-                await self.hass.services.async_call(
-                    "climate",
-                    "set_hvac_mode",
-                    {
-                        "entity_id": self._main_climate_entity,
-                        "hvac_mode": HVACMode.OFF,
-                    },
-                    blocking=True,
-                )
+                try:
+                    await self.hass.services.async_call(
+                        "climate",
+                        "set_hvac_mode",
+                        {
+                            "entity_id": self._main_climate_entity,
+                            "hvac_mode": HVACMode.OFF,
+                        },
+                        blocking=True,
+                    )
+                except Exception as err:
+                    _LOGGER.error(
+                        "Failed to turn off main climate %s: %s",
+                        self._main_climate_entity,
+                        err,
+                    )
         elif hvac_mode == HVACMode.HEAT:
             # Turn on main climate if configured
             if self._main_climate_entity:
-                await self.hass.services.async_call(
-                    "climate",
-                    "set_hvac_mode",
-                    {
-                        "entity_id": self._main_climate_entity,
-                        "hvac_mode": HVACMode.HEAT,
-                    },
-                    blocking=True,
-                )
+                try:
+                    await self.hass.services.async_call(
+                        "climate",
+                        "set_hvac_mode",
+                        {
+                            "entity_id": self._main_climate_entity,
+                            "hvac_mode": HVACMode.HEAT,
+                        },
+                        blocking=True,
+                    )
+                except Exception as err:
+                    _LOGGER.error(
+                        "Failed to turn on main climate %s: %s",
+                        self._main_climate_entity,
+                        err,
+                    )
             
             # Control valves based on zone temperatures
             await self._async_control_valves()
@@ -340,30 +365,34 @@ class MultizoneHeaterClimate(ClimateEntity):
             # Turn on valves asynchronously
             for valve_entity in valves_to_turn_on:
                 if not current_valve_states.get(valve_entity):
+                    # Extract domain from entity_id to support non-switch valves
+                    domain = valve_entity.split('.')[0] if '.' in valve_entity else 'switch'
                     tasks.append(
-                        self.hass.services.async_call(
-                            "switch",
+                        self._async_call_service_with_error_handling(
+                            domain,
                             SERVICE_TURN_ON,
                             {"entity_id": valve_entity},
-                            blocking=False,
+                            f"turn on valve {valve_entity}",
                         )
                     )
 
             # Turn off valves asynchronously
             for valve_entity in valves_to_turn_off:
                 if current_valve_states.get(valve_entity):
+                    # Extract domain from entity_id to support non-switch valves
+                    domain = valve_entity.split('.')[0] if '.' in valve_entity else 'switch'
                     tasks.append(
-                        self.hass.services.async_call(
-                            "switch",
+                        self._async_call_service_with_error_handling(
+                            domain,
                             SERVICE_TURN_OFF,
                             {"entity_id": valve_entity},
-                            blocking=False,
+                            f"turn off valve {valve_entity}",
                         )
                     )
 
             # Execute all valve changes in parallel
             if tasks:
-                await asyncio.gather(*tasks)
+                await asyncio.gather(*tasks, return_exceptions=True)
 
             # Update cached valve states
             self._last_valve_states = {
@@ -385,6 +414,20 @@ class MultizoneHeaterClimate(ClimateEntity):
 
         return valve_states
 
+    async def _async_call_service_with_error_handling(
+        self, domain: str, service: str, service_data: dict, operation: str
+    ) -> None:
+        """Call a service with error handling."""
+        try:
+            await self.hass.services.async_call(
+                domain,
+                service,
+                service_data,
+                blocking=False,
+            )
+        except Exception as err:
+            _LOGGER.error("Failed to %s: %s", operation, err)
+
     async def _async_turn_off_all_valves(self) -> None:
         """Turn off all valves except minimum required."""
         async with self._update_lock:
@@ -396,14 +439,16 @@ class MultizoneHeaterClimate(ClimateEntity):
 
             for valve_entity in valve_entities:
                 if valve_entity not in valves_to_keep_open:
+                    # Extract domain from entity_id to support non-switch valves
+                    domain = valve_entity.split('.')[0] if '.' in valve_entity else 'switch'
                     tasks.append(
-                        self.hass.services.async_call(
-                            "switch",
+                        self._async_call_service_with_error_handling(
+                            domain,
                             SERVICE_TURN_OFF,
                             {"entity_id": valve_entity},
-                            blocking=False,
+                            f"turn off valve {valve_entity}",
                         )
                     )
 
             if tasks:
-                await asyncio.gather(*tasks)
+                await asyncio.gather(*tasks, return_exceptions=True)
