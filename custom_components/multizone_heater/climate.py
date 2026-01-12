@@ -479,62 +479,25 @@ class MultizoneHeaterClimate(ClimateEntity):
 
     async def async_update(self) -> None:
         """Update the entity."""
-        # Get current temperature from main climate entity or main temp sensor
-        # (not from zones - main climate has its own sensor in corridor)
+        # This entity is used for control only, not for temperature display
+        # Current temperature is intentionally not set
         self._current_temperature = None
 
-        # First try main temp sensor override if configured
-        if self._main_temp_sensor:
-            sensor_state = self.hass.states.get(self._main_temp_sensor)
-            if sensor_state and sensor_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                try:
-                    self._current_temperature = float(sensor_state.state)
-                except (ValueError, TypeError):
-                    _LOGGER.warning(
-                        "Unable to parse temperature from main sensor %s",
-                        self._main_temp_sensor,
-                    )
-
-        # Fall back to main climate entity's current temperature
-        if self._current_temperature is None and self._main_climate_entity:
-            climate_state = self.hass.states.get(self._main_climate_entity)
-            if climate_state and climate_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                temp_attr = climate_state.attributes.get("current_temperature")
-                if temp_attr is not None:
-                    try:
-                        self._current_temperature = float(temp_attr)
-                    except (ValueError, TypeError):
-                        _LOGGER.warning(
-                            "Unable to parse current temperature from main climate %s",
-                            self._main_climate_entity,
-                        )
-
-        # Update HVAC action
+        # Update HVAC action based on valve states and mode
         if self._hvac_mode == HVACMode.OFF:
             self._hvac_action = HVACAction.OFF
         elif self._hvac_mode == HVACMode.COOL:
-            if self._current_temperature is not None and self._target_temperature is not None:
-                if self._current_temperature > self._target_temperature + DEFAULT_HVAC_ACTION_DEADBAND:
-                    self._hvac_action = HVACAction.COOLING
-                elif self._current_temperature < self._target_temperature - DEFAULT_HVAC_ACTION_DEADBAND:
-                    self._hvac_action = HVACAction.IDLE
-                else:
-                    self._hvac_action = HVACAction.IDLE
+            # In cooling mode, check if any valves are open
+            valve_states = await self._async_get_valve_states()
+            if any(valve_states.values()):
+                self._hvac_action = HVACAction.COOLING
             else:
                 self._hvac_action = HVACAction.IDLE
         elif self._hvac_mode == HVACMode.HEAT:
-            if self._current_temperature is not None and self._target_temperature is not None:
-                if self._current_temperature < self._target_temperature - DEFAULT_HVAC_ACTION_DEADBAND:
-                    self._hvac_action = HVACAction.HEATING
-                elif self._current_temperature > self._target_temperature + DEFAULT_HVAC_ACTION_DEADBAND:
-                    self._hvac_action = HVACAction.IDLE
-                else:
-                    # In deadband
-                    valve_states = await self._async_get_valve_states()
-                    if any(valve_states.values()):
-                        self._hvac_action = HVACAction.HEATING
-                    else:
-                        self._hvac_action = HVACAction.IDLE
+            # In heating mode, check if any valves are open
+            valve_states = await self._async_get_valve_states()
+            if any(valve_states.values()):
+                self._hvac_action = HVACAction.HEATING
             else:
                 self._hvac_action = HVACAction.IDLE
         else:
@@ -603,15 +566,45 @@ class MultizoneHeaterClimate(ClimateEntity):
 
         # Update main climate target if needed
         if desired_main is not None:
+            # Get the current target from the main climate entity
+            # This ensures we detect external changes to the target temperature
+            current_main_target = None
+            climate_state = self.hass.states.get(self._main_climate_entity)
+            if climate_state and climate_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                temp_attr = climate_state.attributes.get("temperature")
+                if temp_attr is not None:
+                    try:
+                        current_main_target = float(temp_attr)
+                    except (ValueError, TypeError):
+                        _LOGGER.warning(
+                            "Unable to parse target temperature from main climate %s",
+                            self._main_climate_entity,
+                        )
+
             # Only update if change exceeds threshold
-            if self._last_main_target is None or abs(desired_main - self._last_main_target) >= self._main_change_threshold:
-                last_target_display = self._last_main_target if self._last_main_target is not None else 0.0
-                _LOGGER.debug(
-                    "Updating main climate from %.1f°C to %.1f°C (change %.1f°C)",
-                    last_target_display,
-                    desired_main,
-                    abs(desired_main - last_target_display),
-                )
+            # Compare with actual current target, not just our cached value
+            cached_target = self._last_main_target if self._last_main_target is not None else 0.0
+            
+            if current_main_target is not None:
+                should_update = abs(desired_main - current_main_target) >= self._main_change_threshold
+            else:
+                # If we can't read the current target, use our cached value as fallback
+                should_update = self._last_main_target is None or abs(desired_main - self._last_main_target) >= self._main_change_threshold
+
+            if should_update:
+                if current_main_target is not None:
+                    _LOGGER.debug(
+                        "Updating main climate from %.1f°C to %.1f°C (change %.1f°C)",
+                        current_main_target,
+                        desired_main,
+                        abs(desired_main - current_main_target),
+                    )
+                else:
+                    _LOGGER.debug(
+                        "Updating main climate to %.1f°C (current target unavailable, using cached=%.1f°C)",
+                        desired_main,
+                        cached_target,
+                    )
 
                 try:
                     await self.hass.services.async_call(
@@ -629,6 +622,22 @@ class MultizoneHeaterClimate(ClimateEntity):
                         "Failed to set main climate temperature to %.1f°C: %s",
                         desired_main,
                         err,
+                    )
+            else:
+                if current_main_target is not None:
+                    _LOGGER.debug(
+                        "Skipping main climate update: current=%.1f°C, desired=%.1f°C, change=%.1f°C (threshold=%.1f°C)",
+                        current_main_target,
+                        desired_main,
+                        abs(desired_main - current_main_target),
+                        self._main_change_threshold,
+                    )
+                else:
+                    _LOGGER.debug(
+                        "Skipping main climate update: current target unknown, cached=%.1f°C, desired=%.1f°C (threshold=%.1f°C)",
+                        cached_target,
+                        desired_main,
+                        self._main_change_threshold,
                     )
 
     def _get_zone_satisfaction_bounds(
