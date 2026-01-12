@@ -396,14 +396,16 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Initialize options flow."""
         self._zones = []
         self._zone_to_edit = None
+        self._zones_initialized = False
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
         """Show options menu."""
         # Initialize zones from config entry on first call
-        if not self._zones:
+        if not self._zones_initialized:
             self._zones = list(self.config_entry.data.get(CONF_ZONES, []))
+            self._zones_initialized = True
         
         if user_input is not None:
             action = user_input.get("action")
