@@ -406,7 +406,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if not self._zones_initialized:
             self._zones = list(self.config_entry.data.get(CONF_ZONES, []))
             self._zones_initialized = True
-        
+
         if user_input is not None:
             action = user_input.get("action")
             if action == "global_settings":
