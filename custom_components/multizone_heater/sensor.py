@@ -237,29 +237,29 @@ class ZoneValveStateSensor(CoordinatorEntity, SensorEntity):
             model="Multizone Controller",
         )
 
-    @property
-    def native_value(self) -> str | None:
-        """Return the zone valve state."""
+    def _get_valve_state(self) -> bool | None:
+        """Get the valve open state from coordinator data."""
         if self.coordinator.data and "zone_states" in self.coordinator.data:
             zone_data = self.coordinator.data["zone_states"].get(self._zone_name)
             if zone_data:
-                is_open = zone_data.get("is_valve_open")
-                if is_open is None:
-                    return None  # Unknown state
-                return "open" if is_open else "closed"
+                return zone_data.get("is_valve_open")
         return None
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the zone valve state."""
+        is_open = self._get_valve_state()
+        if is_open is None:
+            return None  # Unknown state
+        return "open" if is_open else "closed"
 
     @property
     def icon(self) -> str:
         """Return the icon based on valve state."""
-        if self.coordinator.data and "zone_states" in self.coordinator.data:
-            zone_data = self.coordinator.data["zone_states"].get(self._zone_name)
-            if zone_data:
-                is_open = zone_data.get("is_valve_open")
-                if is_open is None:
-                    return "mdi:valve"  # Unknown state
-                return "mdi:valve-open" if is_open else "mdi:valve-closed"
-        return "mdi:valve"  # Unknown state
+        is_open = self._get_valve_state()
+        if is_open is None:
+            return "mdi:valve"  # Unknown state
+        return "mdi:valve-open" if is_open else "mdi:valve-closed"
 
     @property
     def available(self) -> bool:
