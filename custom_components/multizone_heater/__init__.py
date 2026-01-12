@@ -134,6 +134,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         all_satisfied_mode=all_satisfied_mode,
         main_min_temp=main_min_temp,
         main_max_temp=main_max_temp,
+        main_climate_entity_id=main_climate,
     )
     
     # Store coordinator and config

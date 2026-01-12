@@ -25,6 +25,7 @@ class MultizoneCoordinator(DataUpdateCoordinator):
         all_satisfied_mode: int,
         main_min_temp: float,
         main_max_temp: float,
+        main_climate_entity_id: str | None = None,
     ) -> None:
         """Initialize the coordinator.
         
@@ -38,6 +39,7 @@ class MultizoneCoordinator(DataUpdateCoordinator):
             all_satisfied_mode: Slider value for holding mode (0-100)
             main_min_temp: Minimum main climate temperature
             main_max_temp: Maximum main climate temperature
+            main_climate_entity_id: Entity ID of the main climate entity to control
         """
         super().__init__(
             hass,
@@ -52,6 +54,50 @@ class MultizoneCoordinator(DataUpdateCoordinator):
         self._all_satisfied_mode = all_satisfied_mode
         self._main_min_temp = main_min_temp
         self._main_max_temp = main_max_temp
+        self._main_climate_entity_id = main_climate_entity_id
+
+    async def _async_set_main_climate_temperature(
+        self,
+        target_temp: float,
+        hvac_mode: str,
+    ) -> None:
+        """Set the target temperature on the main climate entity.
+        
+        Args:
+            target_temp: The target temperature to set
+            hvac_mode: The HVAC mode (heat or cool)
+        """
+        try:
+            _LOGGER.debug(
+                "Setting main climate %s to %.1f°C (mode: %s)",
+                self._main_climate_entity_id,
+                target_temp,
+                hvac_mode,
+            )
+            
+            # Call the climate.set_temperature service
+            await self.hass.services.async_call(
+                "climate",
+                "set_temperature",
+                {
+                    "entity_id": self._main_climate_entity_id,
+                    "temperature": target_temp,
+                    "hvac_mode": hvac_mode,
+                },
+                blocking=False,
+            )
+            
+            _LOGGER.debug(
+                "Successfully set main climate temperature to %.1f°C",
+                target_temp,
+            )
+        except Exception as err:
+            _LOGGER.error(
+                "Failed to set main climate temperature to %.1f°C: %s",
+                target_temp,
+                err,
+                exc_info=True,
+            )
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from sensors and compute targets.
@@ -109,6 +155,13 @@ class MultizoneCoordinator(DataUpdateCoordinator):
                 len(zones),
                 self._all_satisfied_mode,
             )
+            
+            # Set the calculated temperature to the main climate entity
+            if main_target is not None and self._main_climate_entity_id:
+                await self._async_set_main_climate_temperature(
+                    main_target, 
+                    hvac_mode
+                )
             
             # Compute zone targets
             zone_targets = compute_zone_targets(
