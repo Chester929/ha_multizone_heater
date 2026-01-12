@@ -6,7 +6,6 @@ DOMAIN = "multizone_heater"
 CONF_ZONES = "zones"
 CONF_ZONE_NAME = "zone_name"
 CONF_ZONE_CLIMATE = "zone_climate"
-CONF_TEMPERATURE_SENSOR = "temperature_sensor"
 CONF_VALVE_SWITCH = "valve_switch"
 CONF_VIRTUAL_SWITCH = "virtual_switch"
 CONF_TARGET_TEMP_OFFSET = "target_temp_offset"
@@ -25,10 +24,9 @@ CONF_ALL_SATISFIED_MODE = "all_satisfied_mode"
 CONF_UPDATE_INTERVAL = "update_interval"
 
 # Defaults
-DEFAULT_TARGET_TEMP_OFFSET = 0.5
-DEFAULT_TARGET_TEMP_OFFSET_CLOSING = 0.0
+DEFAULT_TARGET_TEMP_OFFSET = 0.3
+DEFAULT_TARGET_TEMP_OFFSET_CLOSING = 0.3
 DEFAULT_MIN_VALVES_OPEN = 1
-DEFAULT_HVAC_ACTION_DEADBAND = 0.5  # Temperature deadband for HVAC action determination
 DEFAULT_COMPENSATION_FACTOR = 0.66  # Corridor compensation factor
 DEFAULT_VALVE_TRANSITION_DELAY = 60  # Seconds to wait between valve operations
 DEFAULT_MAIN_MIN_TEMP = 18.0  # Minimum main climate temperature
@@ -36,6 +34,4 @@ DEFAULT_MAIN_MAX_TEMP = 30.0  # Maximum main climate temperature
 DEFAULT_MAIN_CHANGE_THRESHOLD = 0.1  # Minimum change to update main climate
 DEFAULT_PHYSICAL_CLOSE_ANTICIPATION = 0.6  # Early close offset for physical valves
 DEFAULT_ALL_SATISFIED_MODE = 50  # 0-100%, where 0=min, 50=avg, 100=max
-DEFAULT_RECONCILIATION_INTERVAL = 5  # Seconds between periodic valve reconciliation checks
-DEFAULT_ZONE_TARGET_CHANGE_DELAY = 5  # Seconds to wait after zone target change before updating main climate
 DEFAULT_UPDATE_INTERVAL = 30  # Seconds between coordinator updates
