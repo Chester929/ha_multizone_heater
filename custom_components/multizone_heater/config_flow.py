@@ -422,9 +422,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         if user_input is not None:
             # Validate main_min_temp < main_max_temp
-            main_min = user_input.get(CONF_MIN_VALVES_OPEN, DEFAULT_MIN_VALVES_OPEN)
-            main_max = user_input.get(CONF_MAIN_MAX_TEMP, DEFAULT_MAIN_MAX_TEMP)
             main_min_temp = user_input.get(CONF_MAIN_MIN_TEMP, DEFAULT_MAIN_MIN_TEMP)
+            main_max = user_input.get(CONF_MAIN_MAX_TEMP, DEFAULT_MAIN_MAX_TEMP)
             
             if main_min_temp >= main_max:
                 errors["base"] = "invalid_temp_range"
