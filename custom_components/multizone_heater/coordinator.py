@@ -61,6 +61,7 @@ class MultizoneCoordinator(DataUpdateCoordinator):
             - main_target: Computed main climate target temperature
             - is_holding_mode: Whether in holding mode (all zones satisfied)
             - zone_targets: Dictionary of per-zone target info
+            - zone_states: Dictionary of per-zone state info (current_temp, valve_state)
             - hvac_mode: Current HVAC mode
         
         Raises:
@@ -75,6 +76,7 @@ class MultizoneCoordinator(DataUpdateCoordinator):
                     "main_target": None,
                     "is_holding_mode": False,
                     "zone_targets": {},
+                    "zone_states": {},
                     "hvac_mode": hvac_mode,
                 }
             
@@ -86,6 +88,7 @@ class MultizoneCoordinator(DataUpdateCoordinator):
                     "main_target": None,
                     "is_holding_mode": False,
                     "zone_targets": {},
+                    "zone_states": {},
                     "hvac_mode": hvac_mode,
                 }
             
@@ -105,6 +108,17 @@ class MultizoneCoordinator(DataUpdateCoordinator):
                 hvac_mode=hvac_mode,
             )
             
+            # Build zone states for sensor exposure
+            zone_states = {}
+            for zone in zones:
+                zone_states[zone.name] = {
+                    "current_temp": zone.current_temp,
+                    "target_temp": zone.target_temp,
+                    "is_valve_open": zone.is_valve_open,
+                    "target_offset": zone.target_offset,
+                    "target_offset_closing": zone.target_offset_closing,
+                }
+            
             _LOGGER.debug(
                 "Updated data: main_target=%.1f°C, is_holding=%s, zones=%d",
                 main_target if main_target is not None else 0.0,
@@ -116,6 +130,7 @@ class MultizoneCoordinator(DataUpdateCoordinator):
                 "main_target": main_target,
                 "is_holding_mode": is_holding_mode,
                 "zone_targets": zone_targets,
+                "zone_states": zone_states,
                 "hvac_mode": hvac_mode,
             }
             
