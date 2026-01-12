@@ -68,14 +68,6 @@ def compute_main_target(
             
         zone_targets.append(zone.target_temp)
         
-        # Calculate compensation-based desired main temperature
-        if hvac_mode == "heat":
-            deficit = zone.target_temp - zone.current_temp
-            zone_desired_main = zone.target_temp + compensation_factor * deficit
-        else:  # cool
-            surplus = zone.current_temp - zone.target_temp
-            zone_desired_main = zone.target_temp - compensation_factor * surplus
-        
         # Get satisfaction bounds
         if hvac_mode == "heat":
             lower_bound = zone.target_temp - zone.target_offset
@@ -84,12 +76,25 @@ def compute_main_target(
             lower_bound = zone.target_temp - zone.target_offset_closing
             upper_bound = zone.target_temp + zone.target_offset
         
-        # Zone needs action if outside satisfaction range
-        needs_action = zone.current_temp < lower_bound or zone.current_temp > upper_bound
-        
-        if needs_action:
-            zones_needing_action.append(zone.name)
-            per_zone_desired_main.append(zone_desired_main)
+        # Determine if zone needs the current HVAC mode action
+        # In heating mode: only zones needing heat (current < target) contribute
+        # In cooling mode: only zones needing cooling (current > target) contribute
+        if hvac_mode == "heat":
+            # Zone needs heat if below lower bound (underheated)
+            needs_mode_action = zone.current_temp < lower_bound
+            if needs_mode_action:
+                deficit = zone.target_temp - zone.current_temp
+                zone_desired_main = zone.target_temp + compensation_factor * deficit
+                zones_needing_action.append(zone.name)
+                per_zone_desired_main.append(zone_desired_main)
+        else:  # cool
+            # Zone needs cooling if above upper bound (overheated)
+            needs_mode_action = zone.current_temp > upper_bound
+            if needs_mode_action:
+                surplus = zone.current_temp - zone.target_temp
+                zone_desired_main = zone.target_temp - compensation_factor * surplus
+                zones_needing_action.append(zone.name)
+                per_zone_desired_main.append(zone_desired_main)
     
     # Calculate desired main climate target
     desired_main = None
