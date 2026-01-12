@@ -86,6 +86,24 @@ This integration provides an efficient, asynchronous Python-based solution for m
      - **Fallback Zones**: Select at least one zone to keep open when all zones are satisfied or during cooling mode
      - This ensures pump safety by preventing all valves from closing simultaneously
 
+### Managing Zones After Setup
+
+**New in v1.1.0**: You can now manage zones at any time without recreating the integration!
+
+1. Go to **Settings** → **Devices & Services**
+2. Find **Multizone Heater** and click **Configure**
+3. Choose from the menu:
+   - **Global Settings**: Update system-wide parameters
+   - **Manage Zones**: Add, edit, remove zones, or configure fallback zones
+
+**Zone Management Options:**
+- **Add New Zone**: Add additional zones to your system
+- **Edit Existing Zone**: Modify zone settings, change entities, or adjust temperature offsets
+- **Remove Zone**: Remove zones you no longer need (cannot remove the last zone)
+- **Configure Fallback Zones**: Update which zones remain open during cooling or when all zones are satisfied
+
+For detailed information, see [ZONE_MANAGEMENT_GUIDE.md](ZONE_MANAGEMENT_GUIDE.md).
+
 ### Zone Configuration Patterns
 
 **Pattern 1: Zone Climate + Virtual Switch Pattern (Recommended for Generic Thermostat)**

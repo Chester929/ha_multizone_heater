@@ -183,7 +183,12 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
         return self.async_show_form(
-            step_id="user", data_schema=data_schema, errors=errors
+            step_id="user", 
+            data_schema=data_schema, 
+            errors=errors,
+            description_placeholders={
+                "tip": "💡 Tip: All settings can be changed later through the integration options."
+            }
         )
 
     async def async_step_add_zone(
@@ -270,6 +275,9 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             step_id="add_zone",
                             data_schema=self._get_zone_schema(),
                             errors=errors,
+                            description_placeholders={
+                                "zone_count": f"Currently configured zones: {len(self._zones)}"
+                            }
                         )
 
                     # Move to fallback zone selection
@@ -279,6 +287,9 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="add_zone",
             data_schema=self._get_zone_schema(),
             errors=errors,
+            description_placeholders={
+                "zone_count": f"Currently configured zones: {len(self._zones)}"
+            }
         )
 
     async def async_step_fallback_zones(
@@ -384,24 +395,46 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
         self.config_entry = config_entry
+        self._zones = list(config_entry.data.get(CONF_ZONES, []))
+        self._zone_to_edit = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
-        """Manage the options."""
+        """Show options menu."""
+        if user_input is not None:
+            action = user_input.get("action")
+            if action == "global_settings":
+                return await self.async_step_global_settings()
+            elif action == "manage_zones":
+                return await self.async_step_manage_zones()
+
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["global_settings", "manage_zones"],
+        )
+
+    async def async_step_global_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Configure global settings."""
         errors = {}
 
         if user_input is not None:
             # Validate main_min_temp < main_max_temp
-            main_min = user_input.get(CONF_MAIN_MIN_TEMP, DEFAULT_MAIN_MIN_TEMP)
+            main_min_temp = user_input.get(CONF_MAIN_MIN_TEMP, DEFAULT_MAIN_MIN_TEMP)
             main_max = user_input.get(CONF_MAIN_MAX_TEMP, DEFAULT_MAIN_MAX_TEMP)
             
-            if main_min >= main_max:
+            if main_min_temp >= main_max:
                 errors["base"] = "invalid_temp_range"
             
             if not errors:
-                # Update the config entry
-                return self.async_create_entry(title="", data=user_input)
+                # Merge with existing data
+                new_data = {**self.config_entry.data, **user_input}
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry, data=new_data
+                )
+                return self.async_create_entry(title="", data={})
 
         data_schema = vol.Schema(
             {
@@ -489,5 +522,374 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         )
 
         return self.async_show_form(
-            step_id="init", data_schema=data_schema, errors=errors
+            step_id="global_settings", data_schema=data_schema, errors=errors
+        )
+
+    async def async_step_manage_zones(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Manage zones menu."""
+        if user_input is not None:
+            action = user_input.get("action")
+            if action == "add_zone":
+                return await self.async_step_add_zone()
+            elif action == "edit_zone":
+                return await self.async_step_select_zone_to_edit()
+            elif action == "remove_zone":
+                return await self.async_step_select_zone_to_remove()
+            elif action == "manage_fallback_zones":
+                return await self.async_step_manage_fallback_zones()
+
+        return self.async_show_menu(
+            step_id="manage_zones",
+            menu_options=["add_zone", "edit_zone", "remove_zone", "manage_fallback_zones"],
+        )
+
+    async def async_step_add_zone(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Add a new zone."""
+        errors = {}
+
+        if user_input is not None:
+            # Validate zone configuration
+            zone_climate = user_input.get(CONF_ZONE_CLIMATE)
+            valve_switch = user_input.get(CONF_VALVE_SWITCH)
+            virtual_switch = user_input.get(CONF_VIRTUAL_SWITCH)
+
+            # Validate that zone climate is provided
+            if not zone_climate:
+                errors[CONF_ZONE_CLIMATE] = "need_zone_climate"
+
+            # Validate that both valve and virtual switch are provided together
+            if valve_switch and not virtual_switch:
+                errors[CONF_VIRTUAL_SWITCH] = "need_virtual_switch"
+            elif virtual_switch and not valve_switch:
+                errors[CONF_VALVE_SWITCH] = "need_physical_valve"
+
+            # Check for duplicate entities
+            if not errors:
+                all_entities = []
+                for zone in self._zones:
+                    if zone.get(CONF_ZONE_CLIMATE):
+                        all_entities.append(zone[CONF_ZONE_CLIMATE])
+                    if zone.get(CONF_VALVE_SWITCH):
+                        all_entities.append(zone[CONF_VALVE_SWITCH])
+                    if zone.get(CONF_VIRTUAL_SWITCH):
+                        all_entities.append(zone[CONF_VIRTUAL_SWITCH])
+
+                if zone_climate and zone_climate in all_entities:
+                    errors[CONF_ZONE_CLIMATE] = "duplicate_entity"
+                if valve_switch and valve_switch in all_entities:
+                    errors[CONF_VALVE_SWITCH] = "duplicate_entity"
+                if virtual_switch and virtual_switch in all_entities:
+                    errors[CONF_VIRTUAL_SWITCH] = "duplicate_entity"
+
+            if not errors:
+                # Add the new zone
+                zone_data = {
+                    CONF_ZONE_NAME: user_input[CONF_ZONE_NAME],
+                    CONF_ZONE_CLIMATE: zone_climate,
+                    CONF_VALVE_SWITCH: valve_switch,
+                    CONF_VIRTUAL_SWITCH: virtual_switch,
+                    CONF_TARGET_TEMP_OFFSET: user_input.get(
+                        CONF_TARGET_TEMP_OFFSET, DEFAULT_TARGET_TEMP_OFFSET
+                    ),
+                    CONF_TARGET_TEMP_OFFSET_CLOSING: user_input.get(
+                        CONF_TARGET_TEMP_OFFSET_CLOSING, DEFAULT_TARGET_TEMP_OFFSET_CLOSING
+                    ),
+                }
+                self._zones.append(zone_data)
+
+                # Update config entry
+                new_data = {**self.config_entry.data, CONF_ZONES: self._zones}
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry, data=new_data
+                )
+                
+                # Return to zone management menu
+                return await self.async_step_manage_zones()
+
+        return self.async_show_form(
+            step_id="add_zone",
+            data_schema=self._get_zone_schema(),
+            errors=errors,
+        )
+
+    async def async_step_select_zone_to_edit(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Select zone to edit."""
+        if not self._zones:
+            return self.async_abort(reason="no_zones_to_edit")
+
+        if user_input is not None:
+            zone_name = user_input.get("zone_to_edit")
+            # Find the zone index
+            for idx, zone in enumerate(self._zones):
+                if zone[CONF_ZONE_NAME] == zone_name:
+                    self._zone_to_edit = idx
+                    return await self.async_step_edit_zone()
+
+        zone_options = [zone[CONF_ZONE_NAME] for zone in self._zones]
+        data_schema = vol.Schema(
+            {
+                vol.Required("zone_to_edit"): SelectSelector(
+                    SelectSelectorConfig(
+                        options=zone_options,
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="select_zone_to_edit",
+            data_schema=data_schema,
+        )
+
+    async def async_step_edit_zone(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Edit a zone."""
+        errors = {}
+        zone = self._zones[self._zone_to_edit]
+
+        if user_input is not None:
+            # Validate zone configuration
+            zone_climate = user_input.get(CONF_ZONE_CLIMATE)
+            valve_switch = user_input.get(CONF_VALVE_SWITCH)
+            virtual_switch = user_input.get(CONF_VIRTUAL_SWITCH)
+
+            # Validate that zone climate is provided
+            if not zone_climate:
+                errors[CONF_ZONE_CLIMATE] = "need_zone_climate"
+
+            # Validate that both valve and virtual switch are provided together
+            if valve_switch and not virtual_switch:
+                errors[CONF_VIRTUAL_SWITCH] = "need_virtual_switch"
+            elif virtual_switch and not valve_switch:
+                errors[CONF_VALVE_SWITCH] = "need_physical_valve"
+
+            # Check for duplicate entities (excluding current zone)
+            if not errors:
+                all_entities = []
+                for idx, z in enumerate(self._zones):
+                    if idx == self._zone_to_edit:
+                        continue
+                    if z.get(CONF_ZONE_CLIMATE):
+                        all_entities.append(z[CONF_ZONE_CLIMATE])
+                    if z.get(CONF_VALVE_SWITCH):
+                        all_entities.append(z[CONF_VALVE_SWITCH])
+                    if z.get(CONF_VIRTUAL_SWITCH):
+                        all_entities.append(z[CONF_VIRTUAL_SWITCH])
+
+                if zone_climate and zone_climate in all_entities:
+                    errors[CONF_ZONE_CLIMATE] = "duplicate_entity"
+                if valve_switch and valve_switch in all_entities:
+                    errors[CONF_VALVE_SWITCH] = "duplicate_entity"
+                if virtual_switch and virtual_switch in all_entities:
+                    errors[CONF_VIRTUAL_SWITCH] = "duplicate_entity"
+
+            if not errors:
+                # Update the zone
+                self._zones[self._zone_to_edit] = {
+                    CONF_ZONE_NAME: user_input[CONF_ZONE_NAME],
+                    CONF_ZONE_CLIMATE: zone_climate,
+                    CONF_VALVE_SWITCH: valve_switch,
+                    CONF_VIRTUAL_SWITCH: virtual_switch,
+                    CONF_TARGET_TEMP_OFFSET: user_input.get(
+                        CONF_TARGET_TEMP_OFFSET, DEFAULT_TARGET_TEMP_OFFSET
+                    ),
+                    CONF_TARGET_TEMP_OFFSET_CLOSING: user_input.get(
+                        CONF_TARGET_TEMP_OFFSET_CLOSING, DEFAULT_TARGET_TEMP_OFFSET_CLOSING
+                    ),
+                }
+
+                # Update config entry
+                new_data = {**self.config_entry.data, CONF_ZONES: self._zones}
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry, data=new_data
+                )
+                
+                # Return to zone management menu
+                self._zone_to_edit = None
+                return await self.async_step_manage_zones()
+
+        # Prefill with current values
+        data_schema = vol.Schema(
+            {
+                vol.Required(CONF_ZONE_NAME, default=zone.get(CONF_ZONE_NAME, "")): str,
+                vol.Required(
+                    CONF_ZONE_CLIMATE, 
+                    default=zone.get(CONF_ZONE_CLIMATE)
+                ): EntitySelector(
+                    EntitySelectorConfig(domain="climate")
+                ),
+                vol.Optional(
+                    CONF_VALVE_SWITCH,
+                    default=zone.get(CONF_VALVE_SWITCH)
+                ): EntitySelector(
+                    EntitySelectorConfig(domain=["switch", "input_boolean"])
+                ),
+                vol.Optional(
+                    CONF_VIRTUAL_SWITCH,
+                    default=zone.get(CONF_VIRTUAL_SWITCH)
+                ): EntitySelector(
+                    EntitySelectorConfig(domain=["switch", "input_boolean"])
+                ),
+                vol.Optional(
+                    CONF_TARGET_TEMP_OFFSET, 
+                    default=zone.get(CONF_TARGET_TEMP_OFFSET, DEFAULT_TARGET_TEMP_OFFSET)
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0, max=5, step=0.1, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_TARGET_TEMP_OFFSET_CLOSING, 
+                    default=zone.get(CONF_TARGET_TEMP_OFFSET_CLOSING, DEFAULT_TARGET_TEMP_OFFSET_CLOSING)
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0, max=5, step=0.1, mode=NumberSelectorMode.BOX
+                    )
+                ),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="edit_zone",
+            data_schema=data_schema,
+            errors=errors,
+        )
+
+    async def async_step_select_zone_to_remove(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Select zone to remove."""
+        if not self._zones:
+            return self.async_abort(reason="no_zones_to_remove")
+
+        if len(self._zones) == 1:
+            return self.async_abort(reason="cannot_remove_last_zone")
+
+        if user_input is not None:
+            zone_name = user_input.get("zone_to_remove")
+            # Find and remove the zone
+            self._zones = [z for z in self._zones if z[CONF_ZONE_NAME] != zone_name]
+            
+            # Update fallback zones to remove the deleted zone if present
+            fallback_zones = self.config_entry.data.get(CONF_FALLBACK_ZONES, [])
+            if zone_name in fallback_zones:
+                fallback_zones = [z for z in fallback_zones if z != zone_name]
+                # Ensure at least one fallback zone remains
+                if not fallback_zones and self._zones:
+                    fallback_zones = [self._zones[0][CONF_ZONE_NAME]]
+
+            # Update config entry
+            new_data = {
+                **self.config_entry.data, 
+                CONF_ZONES: self._zones,
+                CONF_FALLBACK_ZONES: fallback_zones
+            }
+            self.hass.config_entries.async_update_entry(
+                self.config_entry, data=new_data
+            )
+            
+            # Return to zone management menu
+            return await self.async_step_manage_zones()
+
+        zone_options = [zone[CONF_ZONE_NAME] for zone in self._zones]
+        data_schema = vol.Schema(
+            {
+                vol.Required("zone_to_remove"): SelectSelector(
+                    SelectSelectorConfig(
+                        options=zone_options,
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="select_zone_to_remove",
+            data_schema=data_schema,
+        )
+
+    async def async_step_manage_fallback_zones(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Manage fallback zones."""
+        errors = {}
+
+        if user_input is not None:
+            fallback_zones = user_input.get(CONF_FALLBACK_ZONES, [])
+            
+            # Validate at least one fallback zone is selected
+            if not fallback_zones:
+                errors[CONF_FALLBACK_ZONES] = "need_fallback"
+            else:
+                # Update config entry
+                new_data = {**self.config_entry.data, CONF_FALLBACK_ZONES: fallback_zones}
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry, data=new_data
+                )
+                
+                # Return to zone management menu
+                return await self.async_step_manage_zones()
+
+        # Build list of zone names for selection
+        zone_options = [zone[CONF_ZONE_NAME] for zone in self._zones]
+        current_fallback = self.config_entry.data.get(CONF_FALLBACK_ZONES, [])
+
+        data_schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_FALLBACK_ZONES,
+                    default=current_fallback
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=zone_options,
+                        multiple=True,
+                        mode=SelectSelectorMode.LIST,
+                    )
+                ),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="manage_fallback_zones",
+            data_schema=data_schema,
+            errors=errors,
+        )
+
+    def _get_zone_schema(self):
+        """Get the schema for adding a zone."""
+        return vol.Schema(
+            {
+                vol.Required(CONF_ZONE_NAME): str,
+                vol.Required(CONF_ZONE_CLIMATE): EntitySelector(
+                    EntitySelectorConfig(domain="climate")
+                ),
+                vol.Optional(CONF_VALVE_SWITCH): EntitySelector(
+                    EntitySelectorConfig(domain=["switch", "input_boolean"])
+                ),
+                vol.Optional(CONF_VIRTUAL_SWITCH): EntitySelector(
+                    EntitySelectorConfig(domain=["switch", "input_boolean"])
+                ),
+                vol.Optional(
+                    CONF_TARGET_TEMP_OFFSET, default=DEFAULT_TARGET_TEMP_OFFSET
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0, max=5, step=0.1, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_TARGET_TEMP_OFFSET_CLOSING, default=DEFAULT_TARGET_TEMP_OFFSET_CLOSING
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0, max=5, step=0.1, mode=NumberSelectorMode.BOX
+                    )
+                ),
+            }
         )
