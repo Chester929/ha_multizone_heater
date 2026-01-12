@@ -38,14 +38,17 @@ async def async_setup_entry(
     if (coordinator.data and 
         "zone_targets" in coordinator.data and 
         "zone_states" in coordinator.data):
-        for zone_name in coordinator.data["zone_targets"].keys():
+        # Get the intersection of zones that exist in both structures
+        # to ensure consistent sensor availability
+        zone_names = set(coordinator.data["zone_targets"].keys()) & set(coordinator.data["zone_states"].keys())
+        
+        for zone_name in zone_names:
             # Add zone target sensor
             entities.append(ZoneTargetSensor(coordinator, config_entry, zone_name))
-            # Add zone current temperature sensor (only if zone_states has the data)
-            if zone_name in coordinator.data["zone_states"]:
-                entities.append(ZoneCurrentTemperatureSensor(coordinator, config_entry, zone_name))
-                # Add zone valve state sensor
-                entities.append(ZoneValveStateSensor(coordinator, config_entry, zone_name))
+            # Add zone current temperature sensor
+            entities.append(ZoneCurrentTemperatureSensor(coordinator, config_entry, zone_name))
+            # Add zone valve state sensor
+            entities.append(ZoneValveStateSensor(coordinator, config_entry, zone_name))
     
     async_add_entities(entities)
 
@@ -251,9 +254,12 @@ class ZoneValveStateSensor(CoordinatorEntity, SensorEntity):
         """Return the icon based on valve state."""
         if self.coordinator.data and "zone_states" in self.coordinator.data:
             zone_data = self.coordinator.data["zone_states"].get(self._zone_name)
-            if zone_data and zone_data.get("is_valve_open"):
-                return "mdi:valve-open"
-        return "mdi:valve-closed"
+            if zone_data:
+                is_open = zone_data.get("is_valve_open")
+                if is_open is None:
+                    return "mdi:valve"  # Unknown state
+                return "mdi:valve-open" if is_open else "mdi:valve-closed"
+        return "mdi:valve"  # Unknown state
 
     @property
     def available(self) -> bool:
