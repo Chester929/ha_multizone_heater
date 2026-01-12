@@ -185,16 +185,13 @@ class TestIssue3Reproduction:
         )
         
         # With closing_offset=0, upper_bound = target + 0 = target
-        # Zone1: current=20.1 > upper_bound=20.0 → needs action (overheated)
-        # Zone2: current=22.6 > upper_bound=22.5 → needs action (overheated)
-        # Both zones are "overheated" so they need action (cooling down)
-        # In heating mode, overheated zones use compensation
+        # Zone1: current=20.1 > upper_bound=20.0 → overheated (not needing heat)
+        # Zone2: current=22.6 > upper_bound=22.5 → overheated (not needing heat)
+        # Both zones are overheated, so no zones need HEATING
+        # In heating mode, overheated zones are ignored
+        # Should be in holding mode with slider-based interpolation
         
-        # Zone1: 20 + 0.66 * (20 - 20.1) = 20 - 0.066 = 19.934
-        # Zone2: 22.5 + 0.66 * (22.5 - 22.6) = 22.5 - 0.066 = 22.434
-        # Max = 22.434 ≈ 22.4
-        
-        assert is_holding is False, "Overheated zones still trigger compensation mode"
+        assert is_holding is True, "Should be in holding mode - no zones need heating"
         assert target is not None
-        # Could this produce a value around 19.5? Only if min_temp clamps it
-        print(f"Target with overheated zones: {target}°C")
+        # Average of [20.0, 22.5] = 21.25
+        assert abs(target - 21.25) < 0.1, f"Expected ~21.25°C (average), got {target}°C"
