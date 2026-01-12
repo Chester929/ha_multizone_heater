@@ -479,27 +479,9 @@ class MultizoneHeaterClimate(ClimateEntity):
 
     async def async_update(self) -> None:
         """Update the entity."""
-        # Get current temperature as average of all zone temperatures
-        # This makes the multizone heater entity independent from the main climate entity
+        # This entity is used for control only, not for temperature display
+        # Current temperature is intentionally not set
         self._current_temperature = None
-
-        # Collect all zone temperatures
-        zone_temperatures = []
-        for zone in self._zones:
-            zone_temp = self._get_zone_temperature(zone)
-            if zone_temp is not None:
-                zone_temperatures.append(zone_temp)
-
-        # Calculate average temperature from zones
-        if zone_temperatures:
-            self._current_temperature = sum(zone_temperatures) / len(zone_temperatures)
-            _LOGGER.debug(
-                "Current temperature (avg of %d zones): %.1f°C",
-                len(zone_temperatures),
-                self._current_temperature,
-            )
-        else:
-            _LOGGER.debug("No zone temperatures available")
 
         # Update HVAC action
         if self._hvac_mode == HVACMode.OFF:
@@ -627,10 +609,11 @@ class MultizoneHeaterClimate(ClimateEntity):
                         abs(desired_main - current_main_target),
                     )
                 else:
+                    cached_target = self._last_main_target if self._last_main_target is not None else 0.0
                     _LOGGER.debug(
                         "Updating main climate to %.1f°C (current target unavailable, using cached=%.1f°C)",
                         desired_main,
-                        self._last_main_target if self._last_main_target is not None else 0.0,
+                        cached_target,
                     )
 
                 try:
@@ -660,9 +643,10 @@ class MultizoneHeaterClimate(ClimateEntity):
                         self._main_change_threshold,
                     )
                 else:
+                    cached_target = self._last_main_target if self._last_main_target is not None else 0.0
                     _LOGGER.debug(
                         "Skipping main climate update: current target unknown, cached=%.1f°C, desired=%.1f°C (threshold=%.1f°C)",
-                        self._last_main_target if self._last_main_target is not None else 0.0,
+                        cached_target,
                         desired_main,
                         self._main_change_threshold,
                     )
