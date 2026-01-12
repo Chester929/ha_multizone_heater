@@ -300,6 +300,34 @@ Compared to blueprint-based automation solutions, this integration offers:
 
 ## Troubleshooting
 
+For comprehensive troubleshooting guidance, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
+### Quick Tips
+
+**Climate Entity Hidden:**
+The climate entity is hidden by default as of v1.0.1. It runs in the background to control valves and update the main climate. To see only sensors in your UI (recommended), leave it disabled. You can manually enable it in **Settings → Entities** if needed.
+
+**Main Climate Not Updating:**
+Enable debug logging to see detailed information about updates:
+```yaml
+logger:
+  default: info
+  logs:
+    custom_components.multizone_heater: debug
+```
+
+Look for messages about main climate updates. Common causes:
+- HVAC mode is OFF (updates only happen in HEAT/COOL mode)
+- Change threshold preventing updates (default 0.1°C)
+- Main climate entity not responding
+
+**Unexpected Main Target Value:**
+The calculation logic is correct and thoroughly tested. If you see an unexpected value:
+- Check zone satisfaction bounds (zones might not be "satisfied")
+- Verify zone target temperatures
+- Review configuration (min/max temps, slider position)
+- Check debug logs for detailed zone calculations
+
 ### Integration Not Appearing
 
 - Ensure the integration files are in the correct directory

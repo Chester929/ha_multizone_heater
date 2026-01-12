@@ -114,6 +114,7 @@ class MultizoneHeaterClimate(ClimateEntity):
 
     _attr_has_entity_name = True
     _attr_name = None
+    _attr_entity_registry_enabled_default = False  # Hidden by default, runs in background
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE
         | ClimateEntityFeature.TURN_OFF
@@ -469,11 +470,19 @@ class MultizoneHeaterClimate(ClimateEntity):
             # Turn off all valves except fallback zones
             await self._async_turn_off_all_valves()
         elif hvac_mode == HVACMode.HEAT:
-            # Control valves based on zone temperatures
-            await self._async_control_valves()
+            # Control valves based on zone temperatures and update main climate
+            await asyncio.gather(
+                self._async_control_valves(),
+                self._async_update_main_climate(),
+                return_exceptions=True
+            )
         elif hvac_mode == HVACMode.COOL:
-            # Open fallback zone valves, close others during cooling
-            await self._async_control_valves_for_cooling()
+            # Open fallback zone valves, close others during cooling and update main climate
+            await asyncio.gather(
+                self._async_control_valves_for_cooling(),
+                self._async_update_main_climate(),
+                return_exceptions=True
+            )
 
         self.async_write_ha_state()
 
@@ -593,17 +602,18 @@ class MultizoneHeaterClimate(ClimateEntity):
 
             if should_update:
                 if current_main_target is not None:
-                    _LOGGER.debug(
-                        "Updating main climate from %.1f°C to %.1f°C (change %.1f°C)",
+                    _LOGGER.info(
+                        "Updating main climate %s from %.1f°C to %.1f°C (change %.1f°C)",
+                        self._main_climate_entity,
                         current_main_target,
                         desired_main,
                         abs(desired_main - current_main_target),
                     )
                 else:
-                    _LOGGER.debug(
-                        "Updating main climate to %.1f°C (current target unavailable, using cached=%.1f°C)",
+                    _LOGGER.info(
+                        "Updating main climate %s to %.1f°C (current target unavailable)",
+                        self._main_climate_entity,
                         desired_main,
-                        cached_target,
                     )
 
                 try:
@@ -617,6 +627,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                         blocking=False,
                     )
                     self._last_main_target = desired_main
+                    _LOGGER.debug("Main climate update service call succeeded")
                 except Exception as err:
                     _LOGGER.error(
                         "Failed to set main climate temperature to %.1f°C: %s",
@@ -708,10 +719,18 @@ class MultizoneHeaterClimate(ClimateEntity):
         for zone in self._zones:
             current_temp = self._get_zone_temperature(zone)
             if current_temp is None:
+                _LOGGER.debug(
+                    "Skipping zone %s: no temperature available",
+                    zone.get(CONF_ZONE_NAME, "unknown")
+                )
                 continue
 
             valve_entity = zone.get(CONF_VALVE_SWITCH)
             if not valve_entity:
+                _LOGGER.debug(
+                    "Skipping zone %s: no valve configured",
+                    zone.get(CONF_ZONE_NAME, "unknown")
+                )
                 continue
 
             zone_target = self._get_zone_target_temperature(zone)
@@ -731,6 +750,16 @@ class MultizoneHeaterClimate(ClimateEntity):
 
             # Zone needs action if outside satisfaction range (underheated or overheated)
             needs_action = current_temp < lower_bound or current_temp > upper_bound
+
+            _LOGGER.debug(
+                "Zone %s: current=%.1f°C, target=%.1f°C, bounds=[%.1f, %.1f]°C, needs_action=%s",
+                zone.get(CONF_ZONE_NAME, valve_entity),
+                current_temp,
+                zone_target,
+                lower_bound,
+                upper_bound,
+                needs_action,
+            )
 
             if needs_action:
                 zones_needing_action.append(valve_entity)
@@ -766,6 +795,14 @@ class MultizoneHeaterClimate(ClimateEntity):
             # Round and clamp to configured range
             desired_main = round(desired_main, 1)
             desired_main = max(self._main_min_temp, min(self._main_max_temp, desired_main))
+
+        _LOGGER.debug(
+            "Main target calculation complete: desired=%.1f°C, is_holding=%s, zones_needing_action=%d, zone_targets=%s",
+            desired_main if desired_main is not None else 0.0,
+            is_holding_mode,
+            len(zones_needing_action),
+            zone_targets,
+        )
 
         return desired_main, is_holding_mode
 
