@@ -483,32 +483,21 @@ class MultizoneHeaterClimate(ClimateEntity):
         # Current temperature is intentionally not set
         self._current_temperature = None
 
-        # Update HVAC action
+        # Update HVAC action based on valve states and mode
         if self._hvac_mode == HVACMode.OFF:
             self._hvac_action = HVACAction.OFF
         elif self._hvac_mode == HVACMode.COOL:
-            if self._current_temperature is not None and self._target_temperature is not None:
-                if self._current_temperature > self._target_temperature + DEFAULT_HVAC_ACTION_DEADBAND:
-                    self._hvac_action = HVACAction.COOLING
-                elif self._current_temperature < self._target_temperature - DEFAULT_HVAC_ACTION_DEADBAND:
-                    self._hvac_action = HVACAction.IDLE
-                else:
-                    self._hvac_action = HVACAction.IDLE
+            # In cooling mode, check if any valves are open
+            valve_states = await self._async_get_valve_states()
+            if any(valve_states.values()):
+                self._hvac_action = HVACAction.COOLING
             else:
                 self._hvac_action = HVACAction.IDLE
         elif self._hvac_mode == HVACMode.HEAT:
-            if self._current_temperature is not None and self._target_temperature is not None:
-                if self._current_temperature < self._target_temperature - DEFAULT_HVAC_ACTION_DEADBAND:
-                    self._hvac_action = HVACAction.HEATING
-                elif self._current_temperature > self._target_temperature + DEFAULT_HVAC_ACTION_DEADBAND:
-                    self._hvac_action = HVACAction.IDLE
-                else:
-                    # In deadband
-                    valve_states = await self._async_get_valve_states()
-                    if any(valve_states.values()):
-                        self._hvac_action = HVACAction.HEATING
-                    else:
-                        self._hvac_action = HVACAction.IDLE
+            # In heating mode, check if any valves are open
+            valve_states = await self._async_get_valve_states()
+            if any(valve_states.values()):
+                self._hvac_action = HVACAction.HEATING
             else:
                 self._hvac_action = HVACAction.IDLE
         else:
@@ -594,6 +583,8 @@ class MultizoneHeaterClimate(ClimateEntity):
 
             # Only update if change exceeds threshold
             # Compare with actual current target, not just our cached value
+            cached_target = self._last_main_target if self._last_main_target is not None else 0.0
+            
             if current_main_target is not None:
                 should_update = abs(desired_main - current_main_target) >= self._main_change_threshold
             else:
@@ -609,7 +600,6 @@ class MultizoneHeaterClimate(ClimateEntity):
                         abs(desired_main - current_main_target),
                     )
                 else:
-                    cached_target = self._last_main_target if self._last_main_target is not None else 0.0
                     _LOGGER.debug(
                         "Updating main climate to %.1f°C (current target unavailable, using cached=%.1f°C)",
                         desired_main,
@@ -643,7 +633,6 @@ class MultizoneHeaterClimate(ClimateEntity):
                         self._main_change_threshold,
                     )
                 else:
-                    cached_target = self._last_main_target if self._last_main_target is not None else 0.0
                     _LOGGER.debug(
                         "Skipping main climate update: current target unknown, cached=%.1f°C, desired=%.1f°C (threshold=%.1f°C)",
                         cached_target,
