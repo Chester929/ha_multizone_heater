@@ -479,35 +479,27 @@ class MultizoneHeaterClimate(ClimateEntity):
 
     async def async_update(self) -> None:
         """Update the entity."""
-        # Get current temperature from main climate entity or main temp sensor
-        # (not from zones - main climate has its own sensor in corridor)
+        # Get current temperature as average of all zone temperatures
+        # This makes the multizone heater entity independent from the main climate entity
         self._current_temperature = None
 
-        # First try main temp sensor override if configured
-        if self._main_temp_sensor:
-            sensor_state = self.hass.states.get(self._main_temp_sensor)
-            if sensor_state and sensor_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                try:
-                    self._current_temperature = float(sensor_state.state)
-                except (ValueError, TypeError):
-                    _LOGGER.warning(
-                        "Unable to parse temperature from main sensor %s",
-                        self._main_temp_sensor,
-                    )
+        # Collect all zone temperatures
+        zone_temperatures = []
+        for zone in self._zones:
+            zone_temp = self._get_zone_temperature(zone)
+            if zone_temp is not None:
+                zone_temperatures.append(zone_temp)
 
-        # Fall back to main climate entity's current temperature
-        if self._current_temperature is None and self._main_climate_entity:
-            climate_state = self.hass.states.get(self._main_climate_entity)
-            if climate_state and climate_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                temp_attr = climate_state.attributes.get("current_temperature")
-                if temp_attr is not None:
-                    try:
-                        self._current_temperature = float(temp_attr)
-                    except (ValueError, TypeError):
-                        _LOGGER.warning(
-                            "Unable to parse current temperature from main climate %s",
-                            self._main_climate_entity,
-                        )
+        # Calculate average temperature from zones
+        if zone_temperatures:
+            self._current_temperature = sum(zone_temperatures) / len(zone_temperatures)
+            _LOGGER.debug(
+                "Current temperature (avg of %d zones): %.1f°C",
+                len(zone_temperatures),
+                self._current_temperature,
+            )
+        else:
+            _LOGGER.debug("No zone temperatures available")
 
         # Update HVAC action
         if self._hvac_mode == HVACMode.OFF:
