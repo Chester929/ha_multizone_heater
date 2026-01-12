@@ -625,10 +625,6 @@ class MultizoneHeaterClimate(ClimateEntity):
             else:
                 # If we can't read the current target, use our cached value as fallback
                 should_update = self._last_main_target is None or abs(desired_main - self._last_main_target) >= self._main_change_threshold
-                _LOGGER.debug(
-                    "Unable to read current main climate target, using cached value (%.1f°C)",
-                    self._last_main_target if self._last_main_target is not None else 0.0,
-                )
 
             if should_update:
                 if current_main_target is not None:
@@ -640,8 +636,9 @@ class MultizoneHeaterClimate(ClimateEntity):
                     )
                 else:
                     _LOGGER.debug(
-                        "Updating main climate to %.1f°C (current target unknown)",
+                        "Updating main climate to %.1f°C (current target unavailable, using cached=%.1f°C)",
                         desired_main,
+                        self._last_main_target if self._last_main_target is not None else 0.0,
                     )
 
                 try:
