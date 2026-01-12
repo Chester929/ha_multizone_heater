@@ -30,7 +30,6 @@ from .const import (
     CONF_PHYSICAL_CLOSE_ANTICIPATION,
     CONF_TARGET_TEMP_OFFSET,
     CONF_TARGET_TEMP_OFFSET_CLOSING,
-    CONF_TEMPERATURE_SENSOR,
     CONF_VALVE_SWITCH,
     CONF_VALVE_TRANSITION_DELAY,
     CONF_VIRTUAL_SWITCH,
@@ -196,14 +195,12 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             # Validate zone configuration
             zone_climate = user_input.get(CONF_ZONE_CLIMATE)
-            temp_sensor = user_input.get(CONF_TEMPERATURE_SENSOR)
             valve_switch = user_input.get(CONF_VALVE_SWITCH)
             virtual_switch = user_input.get(CONF_VIRTUAL_SWITCH)
 
-            # Validate that at least one temperature source is provided
-            if not zone_climate and not temp_sensor:
-                errors[CONF_ZONE_CLIMATE] = "need_temp_source"
-                errors[CONF_TEMPERATURE_SENSOR] = "need_temp_source"
+            # Validate that zone climate is provided
+            if not zone_climate:
+                errors[CONF_ZONE_CLIMATE] = "need_zone_climate"
 
             # Validate that both valve and virtual switch are provided together
             if valve_switch and not virtual_switch:
@@ -217,8 +214,6 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 for zone in self._zones:
                     if zone.get(CONF_ZONE_CLIMATE):
                         all_entities.append(zone[CONF_ZONE_CLIMATE])
-                    if zone.get(CONF_TEMPERATURE_SENSOR):
-                        all_entities.append(zone[CONF_TEMPERATURE_SENSOR])
                     if zone.get(CONF_VALVE_SWITCH):
                         all_entities.append(zone[CONF_VALVE_SWITCH])
                     if zone.get(CONF_VIRTUAL_SWITCH):
@@ -227,8 +222,6 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # Check for duplicates in current input
                 if zone_climate and zone_climate in all_entities:
                     errors[CONF_ZONE_CLIMATE] = "duplicate_entity"
-                if temp_sensor and temp_sensor in all_entities:
-                    errors[CONF_TEMPERATURE_SENSOR] = "duplicate_entity"
                 if valve_switch and valve_switch in all_entities:
                     errors[CONF_VALVE_SWITCH] = "duplicate_entity"
                 if virtual_switch and virtual_switch in all_entities:
@@ -240,7 +233,6 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     zone_data = {
                         CONF_ZONE_NAME: user_input[CONF_ZONE_NAME],
                         CONF_ZONE_CLIMATE: zone_climate,
-                        CONF_TEMPERATURE_SENSOR: temp_sensor,
                         CONF_VALVE_SWITCH: valve_switch,
                         CONF_VIRTUAL_SWITCH: virtual_switch,
                         CONF_TARGET_TEMP_OFFSET: user_input.get(
@@ -260,7 +252,6 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         zone_data = {
                             CONF_ZONE_NAME: user_input[CONF_ZONE_NAME],
                             CONF_ZONE_CLIMATE: zone_climate,
-                            CONF_TEMPERATURE_SENSOR: temp_sensor,
                             CONF_VALVE_SWITCH: valve_switch,
                             CONF_VIRTUAL_SWITCH: virtual_switch,
                             CONF_TARGET_TEMP_OFFSET: user_input.get(
@@ -353,11 +344,8 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return vol.Schema(
             {
                 vol.Required(CONF_ZONE_NAME): str,
-                vol.Optional(CONF_ZONE_CLIMATE): EntitySelector(
+                vol.Required(CONF_ZONE_CLIMATE): EntitySelector(
                     EntitySelectorConfig(domain="climate")
-                ),
-                vol.Optional(CONF_TEMPERATURE_SENSOR): EntitySelector(
-                    EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(CONF_VALVE_SWITCH): EntitySelector(
                     EntitySelectorConfig(domain=["switch", "input_boolean"])

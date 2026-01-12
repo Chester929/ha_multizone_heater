@@ -16,7 +16,6 @@ from .const import (
     CONF_MAIN_TEMP_SENSOR,
     CONF_TARGET_TEMP_OFFSET,
     CONF_TARGET_TEMP_OFFSET_CLOSING,
-    CONF_TEMPERATURE_SENSOR,
     CONF_UPDATE_INTERVAL,
     CONF_VALVE_SWITCH,
     CONF_ZONE_CLIMATE,
@@ -85,14 +84,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             current_temp = float(temp_attr)
                         except (ValueError, TypeError):
                             pass
-            
-            if current_temp is None and zone_config.get(CONF_TEMPERATURE_SENSOR):
-                sensor_state = hass.states.get(zone_config[CONF_TEMPERATURE_SENSOR])
-                if sensor_state and sensor_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                    try:
-                        current_temp = float(sensor_state.state)
-                    except (ValueError, TypeError):
-                        pass
             
             # Get target temperature
             target_temp = 20.0  # Default
