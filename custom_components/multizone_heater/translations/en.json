@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Set up Multizone Heater",
-        "description": "Configure the main climate entity and zone control settings. The main climate (boiler) temperature sensor in the corridor will be used for temperature display.",
+        "description": "Configure the main climate entity and zone control settings. The main climate (boiler) temperature sensor in the corridor will be used for temperature display.\n\n{tip}",
         "data": {
           "main_climate": "Main Climate Entity (optional, but needed for temperature display)",
           "main_temp_sensor": "Main Temperature Sensor Override (optional, overrides main climate sensor)",
@@ -19,7 +19,7 @@
       },
       "add_zone": {
         "title": "Add Heating Zone",
-        "description": "Add a heating zone. Each zone requires a climate entity. If using valves, BOTH physical valve and virtual switch are required.",
+        "description": "Add a heating zone. Each zone requires a climate entity. If using valves, BOTH physical valve and virtual switch are required.\n\n{zone_count}",
         "data": {
           "zone_name": "Zone Name",
           "zone_climate": "Zone Climate Entity (required)",
@@ -51,8 +51,16 @@
   "options": {
     "step": {
       "init": {
-        "title": "Multizone Heater Options",
-        "description": "Configure options for the multizone heater.",
+        "title": "Multizone Heater Configuration",
+        "description": "Choose what you would like to configure.",
+        "menu_options": {
+          "global_settings": "Global Settings",
+          "manage_zones": "Manage Zones"
+        }
+      },
+      "global_settings": {
+        "title": "Global Settings",
+        "description": "Configure system-wide settings that apply to all zones.",
         "data": {
           "min_valves_open": "Minimum Valves Open",
           "compensation_factor": "Compensation Factor",
@@ -63,7 +71,67 @@
           "physical_close_anticipation": "Physical Close Anticipation (°C)",
           "all_satisfied_mode": "Main Target When All Zones Satisfied (0%=lowest target, 50%=average target, 100%=highest target)"
         }
+      },
+      "manage_zones": {
+        "title": "Zone Management",
+        "description": "Add, edit, or remove heating zones and configure fallback zones.",
+        "menu_options": {
+          "add_zone": "Add New Zone",
+          "edit_zone": "Edit Existing Zone",
+          "remove_zone": "Remove Zone",
+          "manage_fallback_zones": "Configure Fallback Zones"
+        }
+      },
+      "add_zone": {
+        "title": "Add New Zone",
+        "description": "Configure a new heating zone. Each zone requires a climate entity. If using valves, BOTH physical valve and virtual switch are required.",
+        "data": {
+          "zone_name": "Zone Name",
+          "zone_climate": "Zone Climate Entity (required)",
+          "valve_switch": "Physical Valve Switch (required if using virtual switch)",
+          "virtual_switch": "Virtual Switch (required if using physical valve)",
+          "target_temp_offset": "Opening Offset Below Target (°C)",
+          "target_temp_offset_closing": "Closing Offset Above Target (°C)"
+        }
+      },
+      "select_zone_to_edit": {
+        "title": "Select Zone to Edit",
+        "description": "Choose which zone you want to modify.",
+        "data": {
+          "zone_to_edit": "Zone"
+        }
+      },
+      "edit_zone": {
+        "title": "Edit Zone",
+        "description": "Modify the settings for this zone.",
+        "data": {
+          "zone_name": "Zone Name",
+          "zone_climate": "Zone Climate Entity (required)",
+          "valve_switch": "Physical Valve Switch (required if using virtual switch)",
+          "virtual_switch": "Virtual Switch (required if using physical valve)",
+          "target_temp_offset": "Opening Offset Below Target (°C)",
+          "target_temp_offset_closing": "Closing Offset Above Target (°C)"
+        }
+      },
+      "select_zone_to_remove": {
+        "title": "Remove Zone",
+        "description": "Select a zone to remove. Note: You cannot remove the last zone.",
+        "data": {
+          "zone_to_remove": "Zone to Remove"
+        }
+      },
+      "manage_fallback_zones": {
+        "title": "Configure Fallback Zones",
+        "description": "Select zones that will remain open when all zones are satisfied or during cooling mode. This ensures pump safety and system stability.",
+        "data": {
+          "fallback_zones": "Fallback Zones (at least one required)"
+        }
       }
+    },
+    "abort": {
+      "no_zones_to_edit": "No zones available to edit. Please add zones first.",
+      "no_zones_to_remove": "No zones available to remove. Please add zones first.",
+      "cannot_remove_last_zone": "Cannot remove the last zone. At least one zone must be configured."
     }
   }
 }
