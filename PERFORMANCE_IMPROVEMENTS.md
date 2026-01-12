@@ -42,29 +42,37 @@ await self.hass.services.async_call(
 
 **Problem**: The valve control logic used a 60-second `asyncio.sleep()` to ensure valves open before closing others. This blocked all valve operations for a full minute.
 
-**Solution**: Refactored to use background task scheduling:
+**Solution**: Refactored to use background task scheduling with intelligent delay logic:
 
 ```python
 # Before
 await asyncio.sleep(self._valve_transition_delay)  # ❌ Blocks for 60 seconds
 
-# After
-# Schedule delayed close as background task
-self._delayed_valve_close_task = self.hass.async_create_task(
-    self._async_delayed_valve_close(valves_to_close)
-)  # ✅ Non-blocking, runs in background
+# After - Smart delay only when needed
+if valves_actually_turning_on and currently_open_count <= self._min_valves_open:
+    # Delay only when at minimum valve threshold
+    self._delayed_valve_close_task = self.hass.async_create_task(
+        self._async_delayed_valve_close(valves_to_close)
+    )  # ✅ Non-blocking background task
+else:
+    # Close immediately when enough valves are open
+    await close_valves_immediately()  # ✅ No delay needed
 ```
 
 **Key Features**:
 - Created `_async_delayed_valve_close()` helper method for background valve closing
 - Added task tracking (`_delayed_valve_close_task`) to manage background operations
 - Proper task cancellation when new valve control is triggered or entity is removed
-- Immediate closing when no delay is needed (no valves opened)
+- **Smart delay logic**: Only delays when opening AND closing at minimum valve threshold
+- Immediate closing when:
+  - No valves are being opened
+  - More than minimum valves are already open (safety margin exists)
 
-**Impact**: 
-- Valve operations complete immediately (no 60-second wait)
+**Impact**:
+- Valve operations complete immediately in most cases (no 60-second wait)
+- Delay only used when necessary for pump safety (at minimum threshold)
 - UI remains fully responsive
-- Safety is maintained (delay still enforced when needed)
+- Better performance while maintaining safety
 
 ### 3. Parallel Execution of Independent Operations
 

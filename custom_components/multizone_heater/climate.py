@@ -953,8 +953,8 @@ class MultizoneHeaterClimate(ClimateEntity):
                     valves_to_turn_on.add(valve)
                     valves_to_turn_off.discard(valve)
 
-            # Two-phase valve operation: open first, schedule delayed close
-            # This prevents blocking for 60 seconds while maintaining safety
+            # Two-phase valve operation: open first, then close
+            # Delay closing only when at minimum valve threshold to ensure safety
 
             # Cancel any pending delayed close task
             if self._delayed_valve_close_task and not self._delayed_valve_close_task.done():
@@ -982,17 +982,33 @@ class MultizoneHeaterClimate(ClimateEntity):
                 _LOGGER.debug("Phase 1: Turning ON %d valves: %s", len(valves_actually_turning_on), valves_actually_turning_on)
                 await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Phase 2: Schedule delayed closing for valves that need to turn off
+            # Phase 2: Close valves with delay only when necessary for safety
             valves_actually_turning_off = [v for v in valves_to_turn_off if current_valve_states.get(v)]
             if valves_actually_turning_off:
-                # Schedule the delayed close task (non-blocking)
-                if valves_actually_turning_on:
-                    # If we opened valves, delay the close for safety
+                # Count currently open valves
+                currently_open_count = sum(1 for v in current_valve_states.values() if v)
+
+                # Delay closing only if:
+                # 1. We're opening valves AND closing valves, AND
+                # 2. We're at or near the minimum valve threshold
+                # This ensures a valve is fully open before closing another for pump safety
+                needs_delay = (
+                    valves_actually_turning_on and
+                    currently_open_count <= self._min_valves_open
+                )
+
+                if needs_delay:
+                    # Delay the close for safety - ensure new valve is fully open first
+                    _LOGGER.debug(
+                        "Delaying valve close (at minimum threshold: %d open, min=%d)",
+                        currently_open_count,
+                        self._min_valves_open
+                    )
                     self._delayed_valve_close_task = self.hass.async_create_task(
                         self._async_delayed_valve_close(valves_actually_turning_off)
                     )
                 else:
-                    # No valves opened, close immediately
+                    # Close immediately - enough valves open for safety
                     tasks = []
                     for valve_entity in valves_actually_turning_off:
                         domain = valve_entity.split('.')[0] if '.' in valve_entity else 'switch'
@@ -1005,8 +1021,17 @@ class MultizoneHeaterClimate(ClimateEntity):
                             )
                         )
 
-                    _LOGGER.debug("Phase 2: Turning OFF %d valves immediately (no valves opened): %s",
-                                 len(valves_actually_turning_off), valves_actually_turning_off)
+                    if valves_actually_turning_on:
+                        reason = f"sufficient valves open ({currently_open_count} > min {self._min_valves_open})"
+                    else:
+                        reason = "no valves being opened"
+
+                    _LOGGER.debug(
+                        "Phase 2: Turning OFF %d valves immediately (%s): %s",
+                        len(valves_actually_turning_off),
+                        reason,
+                        valves_actually_turning_off
+                    )
                     await asyncio.gather(*tasks, return_exceptions=True)
 
     def _get_zone_temperature(self, zone: dict[str, Any]) -> float | None:
