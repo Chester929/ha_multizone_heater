@@ -36,7 +36,7 @@ from .core import ZoneData
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.CLIMATE, Platform.SENSOR]
+PLATFORMS = [Platform.SENSOR]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

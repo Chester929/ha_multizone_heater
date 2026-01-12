@@ -18,7 +18,6 @@ def validate_integration():
         "manifest.json",
         "const.py",
         "config_flow.py",
-        "climate.py",
         "strings.json",
         "translations/en.json",
     ]
@@ -81,7 +80,7 @@ def validate_integration():
     
     # Check Python files can be imported (syntax check)
     print("\nChecking Python syntax...")
-    python_files = ["__init__.py", "const.py", "config_flow.py", "climate.py"]
+    python_files = ["__init__.py", "const.py", "config_flow.py", "sensor.py", "coordinator.py", "core.py"]
     
     for py_file in python_files:
         file_path = base_dir / py_file
