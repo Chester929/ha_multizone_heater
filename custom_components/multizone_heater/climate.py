@@ -985,7 +985,8 @@ class MultizoneHeaterClimate(ClimateEntity):
             # Phase 2: Close valves with delay only when necessary for safety
             valves_actually_turning_off = [v for v in valves_to_turn_off if current_valve_states.get(v)]
             if valves_actually_turning_off:
-                # Count currently open valves
+                # Count currently open valves (before opening new ones in Phase 1)
+                # This determines if we need delay to ensure pump safety
                 currently_open_count = sum(1 for v in current_valve_states.values() if v)
 
                 # Delay closing only if:
