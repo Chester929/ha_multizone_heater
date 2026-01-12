@@ -148,7 +148,7 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_MAIN_MIN_TEMP, default=DEFAULT_MAIN_MIN_TEMP
                 ): NumberSelector(
                     NumberSelectorConfig(
-                        min=5.0, max=25.0, step=0.5, mode=NumberSelectorMode.BOX
+                        min=5.0, max=20.0, step=0.5, mode=NumberSelectorMode.BOX
                     )
                 ),
                 vol.Optional(
@@ -428,9 +428,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             # Validate main_min_temp < main_max_temp
             main_min_temp = user_input.get(CONF_MAIN_MIN_TEMP, DEFAULT_MAIN_MIN_TEMP)
-            main_max = user_input.get(CONF_MAIN_MAX_TEMP, DEFAULT_MAIN_MAX_TEMP)
+            main_max_temp = user_input.get(CONF_MAIN_MAX_TEMP, DEFAULT_MAIN_MAX_TEMP)
             
-            if main_min_temp >= main_max:
+            if main_min_temp >= main_max_temp:
                 errors["base"] = "invalid_temp_range"
             
             if not errors:
@@ -480,7 +480,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     ),
                 ): NumberSelector(
                     NumberSelectorConfig(
-                        min=5.0, max=25.0, step=0.5, mode=NumberSelectorMode.BOX
+                        min=5.0, max=20.0, step=0.5, mode=NumberSelectorMode.BOX
                     )
                 ),
                 vol.Optional(
