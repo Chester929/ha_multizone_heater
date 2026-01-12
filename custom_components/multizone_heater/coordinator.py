@@ -102,6 +102,14 @@ class MultizoneCoordinator(DataUpdateCoordinator):
                 main_max_temp=self._main_max_temp,
             )
             
+            _LOGGER.debug(
+                "Coordinator calculated main_target=%.1f°C, is_holding=%s from %d zones (slider=%d%%)",
+                main_target if main_target is not None else 0.0,
+                is_holding_mode,
+                len(zones),
+                self._all_satisfied_mode,
+            )
+            
             # Compute zone targets
             zone_targets = compute_zone_targets(
                 zones=zones,
