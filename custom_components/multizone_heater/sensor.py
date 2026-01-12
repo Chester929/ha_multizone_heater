@@ -34,14 +34,18 @@ async def async_setup_entry(
     # For now, we'll wait for first coordinator update to get zone names
     await coordinator.async_config_entry_first_refresh()
     
-    if coordinator.data and "zone_targets" in coordinator.data:
+    # Only create zone sensors if we have both zone_targets and zone_states data
+    if (coordinator.data and 
+        "zone_targets" in coordinator.data and 
+        "zone_states" in coordinator.data):
         for zone_name in coordinator.data["zone_targets"].keys():
             # Add zone target sensor
             entities.append(ZoneTargetSensor(coordinator, config_entry, zone_name))
-            # Add zone current temperature sensor
-            entities.append(ZoneCurrentTemperatureSensor(coordinator, config_entry, zone_name))
-            # Add zone valve state sensor
-            entities.append(ZoneValveStateSensor(coordinator, config_entry, zone_name))
+            # Add zone current temperature sensor (only if zone_states has the data)
+            if zone_name in coordinator.data["zone_states"]:
+                entities.append(ZoneCurrentTemperatureSensor(coordinator, config_entry, zone_name))
+                # Add zone valve state sensor
+                entities.append(ZoneValveStateSensor(coordinator, config_entry, zone_name))
     
     async_add_entities(entities)
 
@@ -237,6 +241,8 @@ class ZoneValveStateSensor(CoordinatorEntity, SensorEntity):
             zone_data = self.coordinator.data["zone_states"].get(self._zone_name)
             if zone_data:
                 is_open = zone_data.get("is_valve_open")
+                if is_open is None:
+                    return None  # Unknown state
                 return "open" if is_open else "closed"
         return None
 
