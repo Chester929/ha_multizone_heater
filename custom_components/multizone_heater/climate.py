@@ -603,14 +603,30 @@ class MultizoneHeaterClimate(ClimateEntity):
 
         # Update main climate target if needed
         if desired_main is not None:
+            # Get the current target from the main climate entity
+            # This ensures we detect external changes to the target temperature
+            current_main_target = None
+            climate_state = self.hass.states.get(self._main_climate_entity)
+            if climate_state and climate_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                temp_attr = climate_state.attributes.get("temperature")
+                if temp_attr is not None:
+                    try:
+                        current_main_target = float(temp_attr)
+                    except (ValueError, TypeError):
+                        _LOGGER.warning(
+                            "Unable to parse target temperature from main climate %s",
+                            self._main_climate_entity,
+                        )
+
             # Only update if change exceeds threshold
-            if self._last_main_target is None or abs(desired_main - self._last_main_target) >= self._main_change_threshold:
-                last_target_display = self._last_main_target if self._last_main_target is not None else 0.0
+            # Compare with actual current target, not just our cached value
+            if current_main_target is None or abs(desired_main - current_main_target) >= self._main_change_threshold:
+                current_target_display = current_main_target if current_main_target is not None else "unknown"
                 _LOGGER.debug(
-                    "Updating main climate from %.1f°C to %.1f°C (change %.1f°C)",
-                    last_target_display,
+                    "Updating main climate from %s°C to %.1f°C (change %s°C)",
+                    current_target_display,
                     desired_main,
-                    abs(desired_main - last_target_display),
+                    f"{abs(desired_main - current_main_target):.1f}" if current_main_target is not None else "N/A",
                 )
 
                 try:
@@ -630,6 +646,14 @@ class MultizoneHeaterClimate(ClimateEntity):
                         desired_main,
                         err,
                     )
+            else:
+                _LOGGER.debug(
+                    "Skipping main climate update: current=%.1f°C, desired=%.1f°C, change=%.1f°C (threshold=%.1f°C)",
+                    current_main_target,
+                    desired_main,
+                    abs(desired_main - current_main_target),
+                    self._main_change_threshold,
+                )
 
     def _get_zone_satisfaction_bounds(
         self, zone_target: float, target_offset: float, target_offset_closing: float
