@@ -470,11 +470,19 @@ class MultizoneHeaterClimate(ClimateEntity):
             # Turn off all valves except fallback zones
             await self._async_turn_off_all_valves()
         elif hvac_mode == HVACMode.HEAT:
-            # Control valves based on zone temperatures
-            await self._async_control_valves()
+            # Control valves based on zone temperatures and update main climate
+            await asyncio.gather(
+                self._async_control_valves(),
+                self._async_update_main_climate(),
+                return_exceptions=True
+            )
         elif hvac_mode == HVACMode.COOL:
-            # Open fallback zone valves, close others during cooling
-            await self._async_control_valves_for_cooling()
+            # Open fallback zone valves, close others during cooling and update main climate
+            await asyncio.gather(
+                self._async_control_valves_for_cooling(),
+                self._async_update_main_climate(),
+                return_exceptions=True
+            )
 
         self.async_write_ha_state()
 
@@ -619,6 +627,7 @@ class MultizoneHeaterClimate(ClimateEntity):
                         blocking=False,
                     )
                     self._last_main_target = desired_main
+                    _LOGGER.debug("Main climate update service call succeeded")
                 except Exception as err:
                     _LOGGER.error(
                         "Failed to set main climate temperature to %.1f°C: %s",
