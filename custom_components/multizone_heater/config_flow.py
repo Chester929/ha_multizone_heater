@@ -386,22 +386,25 @@ class MultizoneHeaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry):
         """Get the options flow for this handler."""
-        return OptionsFlowHandler(config_entry)
+        return OptionsFlowHandler()
 
 
 class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options flow for Multizone Heater."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+    def __init__(self) -> None:
         """Initialize options flow."""
-        self.config_entry = config_entry
-        self._zones = list(config_entry.data.get(CONF_ZONES, []))
+        self._zones = []
         self._zone_to_edit = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
         """Show options menu."""
+        # Initialize zones from config entry on first call
+        if not self._zones:
+            self._zones = list(self.config_entry.data.get(CONF_ZONES, []))
+        
         if user_input is not None:
             action = user_input.get("action")
             if action == "global_settings":
